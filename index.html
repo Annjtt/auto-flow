@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0a1120" />
+    <title>Auto Flow — автошахматы</title>
+    <link rel="stylesheet" href="/src/client/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="ambient-glow ambient-a"></div>
+      <div class="ambient-glow ambient-b"></div>
+      <div id="connection" class="connection-badge">Соединение...</div>
+
+      <section id="menu-screen" class="screen active">
+        <header class="brand">
+          <div class="brand-mark">
+            <span class="brand-rune"></span>
+            <span>AUTO<span>FLOW</span></span>
+          </div>
+          <div class="brand-sub">Арена автошахмат · мультиплеер · ИИ</div>
+        </header>
+
+        <div class="menu-layout">
+          <article class="menu-card hero-card">
+            <div class="eyebrow">Тактическая автошахматная арена</div>
+            <h1>Соберите отряд.<br /><em>Переиграйте всех.</em></h1>
+            <p class="hero-copy">
+              Покупайте бойцов, открывайте синергии рас и классов, повышайте звёзды и
+              выставляйте армию. Бойцы сражаются сами — побеждает стратегия.
+            </p>
+            <div class="name-row">
+              <label for="playerName">Ваше имя</label>
+              <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Странник" />
+            </div>
+            <div class="menu-actions">
+              <button id="quickPlay" class="btn btn-primary btn-large">
+                <span>Быстрый бой с ИИ</span>
+                <small>Соло против ботов</small>
+              </button>
+              <button id="openCreate" class="btn btn-large">
+                <span>Создать лобби</span>
+                <small>Свои правила и код</small>
+              </button>
+            </div>
+            <div class="feature-strip">
+              <div><b>6</b><span>рас</span></div>
+              <div><b>24</b><span>бойца</span></div>
+              <div><b>8×8</b><span>арена</span></div>
+              <div><b>до 8</b><span>игроков</span></div>
+            </div>
+          </article>
+
+          <article class="menu-card join-card">
+            <div class="card-heading">
+              <h2>Войти в зал</h2>
+              <span class="ornament"></span>
+            </div>
+            <div class="join-row">
+              <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
+              <button id="joinBtn" class="btn btn-primary">Войти</button>
+            </div>
+            <div class="card-heading lobby-heading">
+              <h2>Публичные залы</h2>
+              <button id="refreshLobbies" class="text-button" type="button">Обновить</button>
+            </div>
+            <div id="lobbyList" class="lobby-list">
+              <div class="empty-state">Пока нет открытых лобби.<br />Создайте своё!</div>
+            </div>
+            <div class="menu-tip">
+              <span class="tip-icon">i</span>
+              <p>Пригласите друзей по пятизначному коду. Игра идёт в реальном времени в браузере.</p>
+            </div>
+          </article>
+        </div>
+
+        <footer class="menu-footer">
+          <span>Auto Flow · Babylon.js · серверная симуляция боя</span>
+          <span>Нажмите на бойца, затем на клетку, чтобы выставить его на поле.</span>
+        </footer>
+      </section>
+
+      <section id="lobby-screen" class="screen">
+        <header class="lobby-top">
+          <button id="leaveLobbyTop" class="text-button back-link" type="button">← В меню</button>
+          <div class="lobby-title">
+            <div class="eyebrow">Лобби</div>
+            <h1 id="roomName">Зал арены</h1>
+          </div>
+          <div class="room-code-box">
+            <span>Код зала</span>
+            <strong id="roomCode">-----</strong>
+            <button id="copyCode" class="text-button" type="button">Копировать</button>
+          </div>
+        </header>
+
+        <div class="lobby-layout">
+          <div class="lobby-main menu-card">
+            <div class="card-heading">
+              <h2>Участники</h2>
+              <span id="lobbyCount" class="muted"></span>
+            </div>
+            <div id="lobbyPlayers" class="player-slots"></div>
+
+            <div class="card-heading settings-heading">
+              <h2>Правила матча</h2>
+            </div>
+            <div id="lobbySettings" class="settings-grid"></div>
+
+            <div class="lobby-actions">
+              <button id="readyBtn" class="btn">Готов</button>
+              <button id="startBtn" class="btn btn-primary">Начать матч</button>
+            </div>
+            <p id="lobbyHint" class="lobby-hint"></p>
+          </div>
+
+          <aside class="lobby-side menu-card">
+            <h2>Как играть</h2>
+            <ol class="how-list">
+              <li><b>Покупайте</b> бойцов в магазине. Три копии одного бойца сливаются в звёздное улучшение.</li>
+              <li><b>Собирайте</b> синергии рас и классов. Они усиливают весь отряд.</li>
+              <li><b>Выставляйте</b> бойцов на свою половину поля и повышайте уровень ради новых слотов.</li>
+              <li><b>Смотрите бой.</b> Бойцы действуют автоматически, способности срабатывают при полной мане.</li>
+            </ol>
+            <div class="lobby-aside-note">
+              Проигравший теряет жизни. Последний оставшийся игрок забирает арену.
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="game-screen" class="screen">
+        <canvas id="renderCanvas" touch-action="none"></canvas>
+        <div class="game-overlay">
+          <header class="game-hud">
+            <div class="self-stats">
+              <div class="stat stat-lives"><b id="hudLives">30</b><span>жизни</span></div>
+              <div class="stat stat-gold"><b id="hudGold">0</b><span>золото</span></div>
+              <div class="stat stat-level">
+                <b id="hudLevel">2</b><span>уровень</span>
+                <i><em id="hudXpFill"></em></i>
+              </div>
+              <div class="stat stat-phase"><b id="hudTimer">32</b><span id="hudPhaseLabel">подготовка</span></div>
+            </div>
+            <div class="round-info">
+              <div class="round-ornament"></div>
+              <span>Раунд</span>
+              <strong><span id="hudRound">1</span> / <span id="hudMaxRounds">24</span></strong>
+              <div class="round-ornament"></div>
+            </div>
+            <div class="hud-side">
+              <div id="playersPanel" class="players-panel"></div>
+              <div class="match-controls">
+                <button id="rulesBtn" class="btn btn-mini match-btn" type="button">Правила</button>
+                <button id="surrenderBtn" class="btn btn-mini match-btn btn-danger" type="button">Сдаться</button>
+              </div>
+            </div>
+          </header>
+
+          <aside id="synergyPanel" class="synergy-panel"></aside>
+          <div id="selectedPanel" class="selected-panel hidden"></div>
+          <div id="phaseBanner" class="phase-banner"></div>
+          <div id="battleResult" class="battle-result hidden"></div>
+          <div id="floatLayer" class="float-layer"></div>
+
+          <div id="shopBar" class="shop-bar">
+            <div class="shop-side">
+              <div class="shop-title">Магазин</div>
+              <button id="xpBtn" class="btn btn-mini" type="button">Опыт <b>4</b></button>
+              <button id="rerollBtn" class="btn btn-mini" type="button">Обновить <b>2</b></button>
+              <button id="lockBtn" class="btn btn-mini" type="button">Замок</button>
+              <div id="lockState" class="lock-state"></div>
+            </div>
+            <div id="shopCards" class="shop-cards"></div>
+          </div>
+
+          <div id="benchBar" class="bench-bar">
+            <div class="bench-label">Скамья <span id="benchCount"></span></div>
+            <div id="benchCards" class="bench-cards"></div>
+          </div>
+
+          <div id="spectatorBanner" class="spectator-banner hidden">
+            <span>Вы выбыли · наблюдайте за ареной</span>
+            <button id="spectatorLeave" class="btn btn-mini" type="button">Вернуться в меню</button>
+          </div>
+
+          <div id="gameOver" class="modal-backdrop hidden">
+            <div class="modal game-over-modal">
+              <div id="gameOverEmblem" class="game-over-emblem"></div>
+              <h2 id="gameOverTitle">Матч завершён</h2>
+              <p id="gameOverText"></p>
+              <button id="backToMenu" class="btn btn-primary" type="button">Вернуться в меню</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+    <div id="tooltip" class="tooltip hidden"></div>
+    <div id="modalRoot"></div>
+
+    <script type="module" src="/src/client/main.ts"></script>
+  </body>
+</html>
