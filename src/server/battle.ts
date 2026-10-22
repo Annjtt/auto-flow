@@ -6,6 +6,7 @@ import {
 } from '../shared/content';
 import {
   STAR_MULTIPLIER,
+  type AbilityDef,
   type BattleEffectView,
   type BattleSnapshot,
   type BattleUnitView,
@@ -217,7 +218,10 @@ export class Battle {
   private attack(attacker: SimUnit, target: SimUnit): void {
     if (!target.alive) return;
     if (this.rng() < target.dodge) {
-      this.addEffect('miss', target.x, target.y, attacker.team, undefined, attacker.x, attacker.y);
+      this.addEffect('miss', target.x, target.y, attacker.team, undefined, attacker.x, attacker.y, {
+        sourceUid: attacker.uid,
+        sourceDef: attacker.defId,
+      });
       attacker.mana = Math.min(attacker.maxMana, attacker.mana + 10);
       return;
     }
@@ -240,7 +244,10 @@ export class Battle {
       if (absorbed > 0) this.addEffect('shield', target.x, target.y, target.team, Math.round(absorbed));
     }
     if (remaining <= 0) {
-      this.addEffect('hit', target.x, target.y, source.team, 0, source.x, source.y);
+      this.addEffect('hit', target.x, target.y, source.team, 0, source.x, source.y, {
+        sourceUid: source.uid,
+        sourceDef: source.defId,
+      });
       return 0;
     }
     target.hp -= remaining;
@@ -249,7 +256,10 @@ export class Battle {
     } else {
       target.mana = Math.min(target.maxMana, target.mana + Math.min(10, remaining * 0.02));
     }
-    this.addEffect('hit', target.x, target.y, source.team, Math.round(remaining), source.x, source.y);
+    this.addEffect('hit', target.x, target.y, source.team, Math.round(remaining), source.x, source.y, {
+      sourceUid: source.uid,
+      sourceDef: source.defId,
+    });
     this.lastDamageAt.set(target.uid, this.time);
     if (target.hp <= 0) {
       target.hp = 0;
@@ -275,7 +285,13 @@ export class Battle {
     const target = this.nearestEnemy(unit);
     if (!target) return;
     unit.mana = 0;
-    this.addEffect('cast', unit.x, unit.y, unit.team);
+    this.addEffect('cast', unit.x, unit.y, unit.team, undefined, undefined, undefined, {
+      sourceUid: unit.uid,
+      sourceDef: unit.defId,
+      ability: ability.kind,
+      radius: ability.radius,
+      targets: this.collectAbilityTargets(unit, ability, target),
+    });
 
     switch (ability.kind) {
       case 'nuke': {
@@ -283,8 +299,7 @@ export class Battle {
         break;
       }
       case 'aoe': {
-        const radius = ability.radius ?? 1.5;
-        const victims = this.enemiesOf(unit).filter((enemy) => Math.hypot(enemy.x - target.x, enemy.y - target.y) <= radius);
+        const victims = this.aoeVictims(unit, target, ability);
         for (const enemy of victims) {
           this.dealDamage(unit, enemy, power, true);
           if (ability.duration && enemy.alive) {
@@ -295,16 +310,13 @@ export class Battle {
       }
       case 'heal': {
         const healAmount = power;
-        const recipients = ability.secondary === 99 ? this.alliesOf(unit) : ability.secondary === 1 ? [unit] : [this.lowestAlly(unit)];
+        const recipients = this.healRecipients(unit, ability);
         for (const ally of recipients) this.heal(ally, healAmount);
         break;
       }
       case 'shield': {
         const shieldAmount = def.id === 'starweaver' ? (ability.secondary ?? 0) * starMult * unit.spellPower : power;
-        const count = (ability.secondary ?? 1) >= 99 ? 99 : Math.max(1, Math.floor(ability.secondary ?? 1));
-        const recipients = this.alliesOf(unit)
-          .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
-          .slice(0, count);
+        const recipients = this.shieldRecipients(unit, ability);
         for (const ally of recipients) {
           ally.shield += shieldAmount;
           this.addEffect('shield', ally.x, ally.y, unit.team, Math.round(shieldAmount));
@@ -325,10 +337,7 @@ export class Battle {
         break;
       }
       case 'chain': {
-        const count = Math.max(1, Math.floor(ability.secondary ?? 3));
-        const victims = this.enemiesOf(unit)
-          .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))
-          .slice(0, count);
+        const victims = this.chainVictims(unit, target, ability);
         for (const enemy of victims) this.dealDamage(unit, enemy, power, true);
         break;
       }
@@ -338,6 +347,58 @@ export class Battle {
         break;
       }
     }
+  }
+
+  private aoeVictims(unit: SimUnit, target: SimUnit, ability: AbilityDef): SimUnit[] {
+    const radius = ability.radius ?? 1.5;
+    return this.enemiesOf(unit).filter((enemy) => Math.hypot(enemy.x - target.x, enemy.y - target.y) <= radius);
+  }
+
+  private healRecipients(unit: SimUnit, ability: AbilityDef): SimUnit[] {
+    if (ability.secondary === 99) return this.alliesOf(unit);
+    if (ability.secondary === 1) return [unit];
+    return [this.lowestAlly(unit)];
+  }
+
+  private shieldRecipients(unit: SimUnit, ability: AbilityDef): SimUnit[] {
+    const count = (ability.secondary ?? 1) >= 99 ? 99 : Math.max(1, Math.floor(ability.secondary ?? 1));
+    return this.alliesOf(unit)
+      .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)
+      .slice(0, count);
+  }
+
+  private chainVictims(unit: SimUnit, target: SimUnit, ability: AbilityDef): SimUnit[] {
+    const count = Math.max(1, Math.floor(ability.secondary ?? 3));
+    return this.enemiesOf(unit)
+      .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))
+      .slice(0, count);
+  }
+
+  private collectAbilityTargets(unit: SimUnit, ability: AbilityDef, target: SimUnit): { x: number; y: number }[] {
+    let targets: SimUnit[] = [];
+    switch (ability.kind) {
+      case 'nuke':
+      case 'stun':
+      case 'drain':
+        targets = [target];
+        break;
+      case 'aoe':
+        targets = this.aoeVictims(unit, target, ability);
+        break;
+      case 'heal':
+        targets = this.healRecipients(unit, ability);
+        break;
+      case 'shield':
+        targets = [...this.shieldRecipients(unit, ability), ...(unit.defId === 'starweaver' ? [target] : [])];
+        break;
+      case 'buff':
+        targets = this.alliesOf(unit);
+        break;
+      case 'chain':
+        targets = this.chainVictims(unit, target, ability);
+        break;
+    }
+    return targets.map((entry) => ({ x: entry.x, y: entry.y }));
   }
 
   private lowestAlly(unit: SimUnit): SimUnit {
@@ -353,6 +414,7 @@ export class Battle {
     value?: number,
     sx?: number,
     sy?: number,
+    extra?: Pick<BattleEffectView, 'sourceUid' | 'sourceDef' | 'ability' | 'radius' | 'targets'>,
   ): void {
     this.effects.push({
       id: `fx-${this.nextEffectId++}`,
@@ -363,6 +425,7 @@ export class Battle {
       value,
       sx,
       sy,
+      ...extra,
       time: this.time,
     });
   }
@@ -420,6 +483,14 @@ export class Battle {
         value: effect.value,
         sx: effect.sx === undefined ? undefined : rotate ? 7 - effect.sx : effect.sx,
         sy: effect.sy === undefined ? undefined : rotate ? 7 - effect.sy : effect.sy,
+        sourceUid: effect.sourceUid,
+        sourceDef: effect.sourceDef,
+        ability: effect.ability,
+        radius: effect.radius,
+        targets: effect.targets?.map((entry) => ({
+          x: rotate ? 7 - entry.x : entry.x,
+          y: rotate ? 7 - entry.y : entry.y,
+        })),
       }));
     let result: BattleSnapshot['result'];
     if (this.result === 'draw') result = 'draw';

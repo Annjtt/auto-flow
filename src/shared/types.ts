@@ -173,6 +173,11 @@ export interface BattleEffectView {
   value?: number;
   sx?: number;
   sy?: number;
+  sourceUid?: string;
+  sourceDef?: string;
+  ability?: AbilityKind;
+  radius?: number;
+  targets?: { x: number; y: number }[];
 }
 
 export interface BattleSnapshot {

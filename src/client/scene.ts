@@ -22,23 +22,79 @@ import { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Culling/ray';
 import '@babylonjs/core/Rendering/edgesRenderer';
 import { getUnitDef } from '../shared/content';
-import type { BattleSnapshot, UnitView } from '../shared/types';
+import type { BattleEffectView, BattleSnapshot, UnitView } from '../shared/types';
+import { createUnitModel, type UnitModel } from './unitModels';
 
-const RACE_COLORS: Record<string, string> = {
-  human: '#d7ad5b',
-  undead: '#77c79a',
-  mech: '#9fb9c9',
-  beast: '#c4864f',
-  demon: '#c75568',
-  elf: '#9bc77f',
+const ABILITY_COLORS: Record<string, string> = {
+  squire: '#9fc7ff',
+  lightfoot: '#a8ffb0',
+  arcanist: '#b18cff',
+  paladin: '#ffe28a',
+  ghoul: '#8fffa8',
+  crypt_archer: '#b6ffb0',
+  necromancer: '#b06cff',
+  bone_dragon: '#bff5ff',
+  scrapbot: '#ffd18a',
+  steamgunner: '#ffb45e',
+  sparkmage: '#7cf0ff',
+  siege_colossus: '#ff8a5a',
+  direwolf: '#ffb070',
+  boar_rider: '#ffd08a',
+  owl_sage: '#9dffc0',
+  elder_bear: '#ffb45e',
+  imp: '#ff7a4a',
+  hellhound: '#ff6a2a',
+  doomguard: '#ff8a5a',
+  pit_fiend: '#ff5a3a',
+  scout: '#c4ff9a',
+  blade_dancer: '#b8ffe0',
+  starweaver: '#d9c4ff',
+  ancient_warden: '#b9ff9a',
 };
 
-const CLASS_COLORS: Record<string, string> = {
-  warrior: '#c9a46a',
-  mage: '#7f9fe0',
-  hunter: '#91c184',
-  assassin: '#b47bd4',
+const ABILITY_ICONS: Record<string, string> = {
+  squire: 'shield',
+  lightfoot: 'dagger',
+  arcanist: 'star',
+  paladin: 'swords',
+  ghoul: 'claw',
+  crypt_archer: 'arrow',
+  necromancer: 'skull',
+  bone_dragon: 'snow',
+  scrapbot: 'gear',
+  steamgunner: 'bullet',
+  sparkmage: 'bolt',
+  siege_colossus: 'rocket',
+  direwolf: 'claw',
+  boar_rider: 'tusk',
+  owl_sage: 'feather',
+  elder_bear: 'paw',
+  imp: 'flame',
+  hellhound: 'flame',
+  doomguard: 'blades',
+  pit_fiend: 'flame',
+  scout: 'arrow',
+  blade_dancer: 'blades',
+  starweaver: 'star',
+  ancient_warden: 'shield',
 };
+
+const PROJECTILE_STYLES: Record<string, string> = {
+  lightfoot: 'dagger',
+  crypt_archer: 'arrow',
+  steamgunner: 'bullet',
+  sparkmage: 'bolt',
+  siege_colossus: 'rocket',
+  imp: 'flame',
+  pit_fiend: 'flame',
+  scout: 'arrow',
+  arcanist: 'orb',
+  starweaver: 'star',
+  necromancer: 'orb',
+};
+
+const ATTACK_TIME = 0.34;
+const CAST_TIME = 0.82;
 
 const GROUND_Y = -1.15;
 
@@ -52,6 +108,10 @@ interface UnitVisual {
   target: Vector3;
   selected: boolean;
   team: number;
+  model: UnitModel;
+  attackTimer: number;
+  castTimer: number;
+  idleSeed: number;
 }
 
 interface FxVisual {
@@ -60,6 +120,23 @@ interface FxVisual {
   born: number;
   ttl: number;
   mode: 'burst' | 'tracer';
+}
+
+interface CastFx {
+  node: TransformNode;
+  material: StandardMaterial;
+  born: number;
+  ttl: number;
+  kind: 'aura' | 'ring' | 'beam' | 'projectile' | 'icon';
+  from?: Vector3;
+  to?: Vector3;
+  base?: Vector3;
+  startScale?: number;
+  endScale?: number;
+  spin?: number;
+  rise?: number;
+  arc?: number;
+  alpha?: number;
 }
 
 export type FloatTextKind = 'damage' | 'heal' | 'shield' | 'miss';
@@ -84,6 +161,8 @@ export class ArenaScene {
   private dropMarkerMat: StandardMaterial | null = null;
   private unitVisuals = new Map<string, UnitVisual>();
   private effects: FxVisual[] = [];
+  private castFx: CastFx[] = [];
+  private fxSeq = 0;
   private seenEffects = new Set<string>();
   private battleRound = 0;
   private preparing = true;
@@ -900,6 +979,11 @@ export class ArenaScene {
       fx.material.dispose();
     }
     this.effects = [];
+    for (const fx of this.castFx) {
+      fx.node.dispose(false, false);
+      fx.material.dispose();
+    }
+    this.castFx = [];
     this.seenEffects.clear();
     this.battleRound = 0;
   }
@@ -930,6 +1014,8 @@ export class ArenaScene {
       const selected = unit.uid === selectedUid;
       visual.selection.setEnabled(selected);
       visual.selected = selected;
+      visual.attackTimer = 0;
+      visual.castTimer = 0;
     }
   }
 
@@ -970,7 +1056,11 @@ export class ArenaScene {
     for (const effect of snapshot.effects) {
       if (this.seenEffects.has(effect.id)) continue;
       this.seenEffects.add(effect.id);
-      this.spawnEffect(effect.kind, effect.x, effect.y, effect.team, effect.id);
+      if (effect.kind === 'cast') {
+        this.playAbilityCast(effect);
+      } else {
+        this.spawnEffect(effect.kind, effect.x, effect.y, effect.team, effect.id);
+      }
       this.spawnFloatText(effect.kind, effect.x, effect.y, effect.value);
       if (
         effect.sx !== undefined &&
@@ -978,6 +1068,9 @@ export class ArenaScene {
         (effect.kind === 'hit' || effect.kind === 'miss')
       ) {
         this.spawnTracer(effect.x, effect.y, effect.sx, effect.sy, effect.team, effect.id);
+      }
+      if ((effect.kind === 'hit' || effect.kind === 'miss') && effect.sourceUid) {
+        this.triggerAttack(effect.sourceUid);
       }
     }
   }
@@ -1017,10 +1110,6 @@ export class ArenaScene {
   private createUnitVisual(unit: UnitView, team: number): UnitVisual {
     const def = getUnitDef(unit.defId);
     const root = new TransformNode(`unit-${unit.uid}`, this.scene);
-    const raceColor = RACE_COLORS[def.race] ?? '#b9a267';
-    const classColor = CLASS_COLORS[def.unitClass] ?? '#8fa6c7';
-    const bodyMat = this.material(`body-${def.race}`, raceColor, '#1a1208');
-    const accentMat = this.material(`accent-${def.unitClass}`, classColor, '#120a1d');
     const teamMat = this.material(team === 0 ? 'teamA' : 'teamB', team === 0 ? '#3f77c7' : '#a83d4d', team === 0 ? '#173a6e' : '#5c1724');
     const starMat = this.material('star', '#f2cc6b', '#9b6f16');
 
@@ -1034,66 +1123,19 @@ export class ArenaScene {
     base.material = teamMat;
     base.metadata = { kind: 'unit', uid: unit.uid };
 
-    const body = MeshBuilder.CreateCylinder(
-      `body-${unit.uid}`,
-      { diameterTop: 0.32, diameterBottom: 0.44, height: 0.5, tessellation: 8 },
-      this.scene,
+    const model = createUnitModel(
+      {
+        scene: this.scene,
+        material: (key, diffuse, emissive) => this.material(key, diffuse, emissive),
+      },
+      def,
+      unit.uid,
     );
-    body.parent = root;
-    body.position.y = 0.39;
-    body.material = bodyMat;
-    body.metadata = { kind: 'unit', uid: unit.uid };
-
-    const head = MeshBuilder.CreateSphere(`head-${unit.uid}`, { diameter: 0.3, segments: 10 }, this.scene);
-    head.parent = root;
-    head.position.y = 0.76;
-    head.material = bodyMat;
-    head.metadata = { kind: 'unit', uid: unit.uid };
-
-    if (def.unitClass === 'warrior') {
-      const shield = MeshBuilder.CreateBox(`shield-${unit.uid}`, { width: 0.08, height: 0.38, depth: 0.32 }, this.scene);
-      shield.parent = root;
-      shield.position = new Vector3(-0.29, 0.42, 0.02);
-      shield.material = accentMat;
-      shield.metadata = { kind: 'unit', uid: unit.uid };
-      const pauldron = MeshBuilder.CreateBox(`pauldron-${unit.uid}`, { width: 0.52, height: 0.09, depth: 0.28 }, this.scene);
-      pauldron.parent = root;
-      pauldron.position.y = 0.58;
-      pauldron.material = accentMat;
-      pauldron.metadata = { kind: 'unit', uid: unit.uid };
-    } else if (def.unitClass === 'mage') {
-      const hat = MeshBuilder.CreateCylinder(
-        `hat-${unit.uid}`,
-        { diameterTop: 0.02, diameterBottom: 0.4, height: 0.34, tessellation: 8 },
-        this.scene,
-      );
-      hat.parent = root;
-      hat.position.y = 0.97;
-      hat.material = accentMat;
-      hat.metadata = { kind: 'unit', uid: unit.uid };
-      const orb = MeshBuilder.CreateSphere(`orb-${unit.uid}`, { diameter: 0.16, segments: 8 }, this.scene);
-      orb.parent = root;
-      orb.position = new Vector3(0.3, 0.52, 0.1);
-      orb.material = this.material('orb', '#8fc4ff', '#3f8fff');
-      orb.metadata = { kind: 'unit', uid: unit.uid };
-    } else if (def.unitClass === 'hunter') {
-      const bow = MeshBuilder.CreateTorus(`bow-${unit.uid}`, { diameter: 0.38, thickness: 0.035, tessellation: 20 }, this.scene);
-      bow.parent = root;
-      bow.rotation.x = Math.PI / 2;
-      bow.position = new Vector3(0.31, 0.48, 0);
-      bow.material = accentMat;
-      bow.metadata = { kind: 'unit', uid: unit.uid };
-    } else {
-      const bladeA = MeshBuilder.CreateBox(`bladeA-${unit.uid}`, { width: 0.04, height: 0.42, depth: 0.08 }, this.scene);
-      bladeA.parent = root;
-      bladeA.position = new Vector3(-0.26, 0.52, 0.12);
-      bladeA.rotation.z = -0.35;
-      bladeA.material = accentMat;
-      bladeA.metadata = { kind: 'unit', uid: unit.uid };
-      const bladeB = bladeA.clone(`bladeB-${unit.uid}`);
-      bladeB.position.x = 0.26;
-      bladeB.rotation.z = 0.35;
-      bladeB.metadata = { kind: 'unit', uid: unit.uid };
+    model.body.parent = root;
+    model.body.rotation.y = team === 0 ? Math.PI : 0;
+    for (const mesh of model.body.getChildMeshes()) {
+      mesh.metadata = { kind: 'unit', uid: unit.uid };
+      mesh.isPickable = true;
     }
 
     const selection = MeshBuilder.CreateTorus(
@@ -1107,36 +1149,37 @@ export class ArenaScene {
     selection.isPickable = false;
     selection.setEnabled(false);
 
+    const barY = Math.max(1.2, model.height);
     for (let i = 0; i < unit.star; i++) {
       const pip = MeshBuilder.CreateSphere(`pip-${unit.uid}-${i}`, { diameter: 0.1, segments: 6 }, this.scene);
       pip.parent = root;
-      pip.position = new Vector3((i - (unit.star - 1) / 2) * 0.14, 1.08, 0);
+      pip.position = new Vector3((i - (unit.star - 1) / 2) * 0.14, barY - 0.16, 0);
       pip.material = starMat;
       pip.isPickable = false;
     }
 
     const hpBg = MeshBuilder.CreatePlane(`hpBg-${unit.uid}`, { width: 0.66, height: 0.09 }, this.scene);
     hpBg.parent = root;
-    hpBg.position = new Vector3(0, 1.2, 0);
+    hpBg.position = new Vector3(0, barY, 0);
     hpBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
     hpBg.material = this.material('hpBg', '#220d12');
     hpBg.isPickable = false;
     const hpFill = MeshBuilder.CreatePlane(`hp-${unit.uid}`, { width: 0.58, height: 0.05 }, this.scene);
     hpFill.parent = root;
-    hpFill.position = new Vector3(0, 1.2, 0.002);
+    hpFill.position = new Vector3(0, barY, 0.002);
     hpFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
     hpFill.material = this.material(team === 0 ? 'hpA' : 'hpB', team === 0 ? '#5fc06f' : '#d45555', team === 0 ? '#1d5a29' : '#651b1b');
     hpFill.isPickable = false;
 
     const manaBg = MeshBuilder.CreatePlane(`manaBg-${unit.uid}`, { width: 0.66, height: 0.06 }, this.scene);
     manaBg.parent = root;
-    manaBg.position = new Vector3(0, 1.13, 0);
+    manaBg.position = new Vector3(0, barY - 0.07, 0);
     manaBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
     manaBg.material = this.material('manaBg', '#071527');
     manaBg.isPickable = false;
     const manaFill = MeshBuilder.CreatePlane(`mana-${unit.uid}`, { width: 0.58, height: 0.03 }, this.scene);
     manaFill.parent = root;
-    manaFill.position = new Vector3(0, 1.13, 0.002);
+    manaFill.position = new Vector3(0, barY - 0.07, 0.002);
     manaFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
     manaFill.material = this.material('mana', '#4d9fff', '#1d4f9c');
     manaFill.isPickable = false;
@@ -1151,6 +1194,10 @@ export class ArenaScene {
       target: new Vector3(unit.x - 3.5, 0, unit.y - 3.5),
       selected: false,
       team,
+      model,
+      attackTimer: 0,
+      castTimer: 0,
+      idleSeed: Math.random() * Math.PI * 2,
     };
   }
 
@@ -1213,6 +1260,552 @@ export class ArenaScene {
     this.effects.push({ mesh, material: mat, born: performance.now(), ttl: 260, mode: 'tracer' });
   }
 
+  private triggerAttack(uid: string): void {
+    const visual = this.unitVisuals.get(uid);
+    if (!visual) return;
+    if (visual.castTimer > 0.08) return;
+    visual.attackTimer = Math.max(visual.attackTimer, ATTACK_TIME);
+  }
+
+  private playAbilityCast(effect: BattleEffectView): void {
+    if (!effect.sourceDef) return;
+    const def = getUnitDef(effect.sourceDef);
+    const color = ABILITY_COLORS[def.id] ?? '#e6c06b';
+    const icon = ABILITY_ICONS[def.id] ?? 'star';
+    const projectile = PROJECTILE_STYLES[def.id] ?? 'orb';
+    const caster = new Vector3(effect.x - 3.5, 0, effect.y - 3.5);
+    const targets = (effect.targets ?? []).map((target) => new Vector3(target.x - 3.5, 0, target.y - 3.5));
+    const visual = effect.sourceUid ? this.unitVisuals.get(effect.sourceUid) : undefined;
+    if (visual) visual.castTimer = CAST_TIME;
+    const iconHeight = visual ? Math.max(1.5, visual.model.height + 0.18) : 1.55;
+
+    this.spawnAura(caster, color, 0.9);
+    this.spawnIcon(caster, icon, color, 0.9, iconHeight);
+
+    const primary = targets[0];
+    const ranged = def.range > 1.4;
+
+    switch (effect.ability ?? def.ability.kind) {
+      case 'heal':
+      case 'shield':
+      case 'buff': {
+        for (const target of targets) {
+          this.spawnAura(target, color, 0.85);
+          this.spawnIcon(target, def.id === 'paladin' ? 'shield' : icon, color, 0.8, 1.48);
+        }
+        if (def.id === 'paladin') {
+          for (const target of targets) this.spawnIcon(target, 'swords', color, 1.12, 1.68);
+          this.spawnIcon(caster, 'swords', color, 1.12, iconHeight + 0.12);
+          this.spawnRing(caster, color, 2.2, 0.9);
+        }
+        if (def.id === 'elder_bear') this.spawnRing(caster, color, 2.4, 0.8);
+        if (def.id === 'ancient_warden') this.spawnRing(caster, color, 1.9, 0.75);
+        if (def.id === 'starweaver' && targets.length > 0) {
+          const enemy = targets[targets.length - 1];
+          this.spawnBeam(caster, enemy, '#e8d68a', 0.1, 0.5);
+          this.spawnIcon(enemy, 'star', color, 0.85, 1.48);
+        }
+        break;
+      }
+      case 'chain': {
+        if (def.id === 'steamgunner') {
+          for (const target of targets) {
+            this.spawnProjectile(caster, target, color, 'bullet', 0.5);
+            this.spawnRing(target, color, 0.9, 0.4);
+            this.spawnIcon(target, icon, color, 0.75, 1.45);
+          }
+        } else {
+          let previous = caster;
+          for (let index = 0; index < targets.length; index++) {
+            const target = targets[index];
+            this.spawnBeam(previous, target, color, 0.07, 0.4);
+            this.spawnRing(target, color, 0.9, 0.4);
+            this.spawnIcon(target, icon, color, 0.75, 1.45);
+            if (index < 6) previous = target;
+          }
+        }
+        break;
+      }
+      case 'aoe': {
+        const diameter = Math.max(0.9, (def.ability.radius ?? 1.5) * 2);
+        for (const target of targets) {
+          this.spawnRing(target, color, diameter, 0.65);
+          this.spawnIcon(target, icon, color, 0.8, 1.45);
+        }
+        if (ranged && primary) this.spawnProjectile(caster, primary, color, projectile, 0.5);
+        if (def.id === 'bone_dragon') {
+          for (const target of targets) {
+            this.spawnBeam(caster, target, '#bff5ff', 0.14, 0.5);
+            this.spawnIcon(target, 'stun', '#dff8ff', 0.75, 1.7);
+          }
+        }
+        if (def.id === 'siege_colossus') {
+          for (const target of targets) this.spawnProjectile(caster, target, '#ff8a5a', 'rocket', 0.7);
+        }
+        if (def.id === 'blade_dancer') this.spawnRing(caster, color, 2.1, 0.7);
+        if (def.id === 'doomguard') this.spawnRing(caster, color, 1.8, 0.6);
+        break;
+      }
+      case 'drain': {
+        for (const target of targets) {
+          this.spawnBeam(target, caster, color, 0.09, 0.7);
+          this.spawnRing(target, color, 1.1, 0.5);
+          this.spawnIcon(target, icon, color, 0.8, 1.45);
+        }
+        break;
+      }
+      default: {
+        for (const target of targets) {
+          this.spawnRing(target, color, effect.ability === 'stun' ? 1.2 : 1.0, 0.5);
+          this.spawnIcon(target, icon, color, 0.85, 1.45);
+          if (effect.ability === 'stun') this.spawnIcon(target, 'stun', '#ffe36e', 0.75, 1.7);
+        }
+        if (ranged && primary) this.spawnProjectile(caster, primary, color, projectile, 0.45);
+        if (def.id === 'boar_rider' && primary) {
+          this.spawnBeam(caster, primary, color, 0.16, 0.28);
+          this.spawnRing(primary, color, 1.3, 0.45);
+        }
+        if (def.id === 'squire') this.spawnIcon(caster, 'shield', color, 0.75, iconHeight);
+        break;
+      }
+    }
+  }
+
+  private fxMaterial(color: string, alpha = 0.9): StandardMaterial {
+    const mat = new StandardMaterial(`abilityFx-${this.fxSeq++}`, this.scene);
+    mat.disableLighting = true;
+    mat.diffuseColor = Color3.Black();
+    mat.emissiveColor = Color3.FromHexString(color);
+    mat.specularColor = Color3.Black();
+    mat.alpha = alpha;
+    mat.backFaceCulling = false;
+    return mat;
+  }
+
+  private spawnAura(at: Vector3, color: string, ttl: number): void {
+    const material = this.fxMaterial(color, 0.85);
+    const node = new TransformNode(`fx-aura-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0.05, at.z);
+    const ring = MeshBuilder.CreateTorus(`fx-aura-ring-${this.fxSeq++}`, { diameter: 0.92, thickness: 0.04, tessellation: 32 }, this.scene);
+    ring.parent = node;
+    ring.material = material;
+    ring.position.y = 0.02;
+    ring.isPickable = false;
+    const ring2 = MeshBuilder.CreateTorus(`fx-aura-ring2-${this.fxSeq++}`, { diameter: 0.74, thickness: 0.025, tessellation: 32 }, this.scene);
+    ring2.parent = node;
+    ring2.material = material;
+    ring2.position.y = 0.42;
+    ring2.rotation.x = Math.PI / 2;
+    ring2.isPickable = false;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'aura',
+      startScale: 0.7,
+      endScale: 1.15,
+      spin: 1.5,
+      alpha: 0.85,
+    });
+  }
+
+  private spawnRing(at: Vector3, color: string, diameter: number, ttl: number): void {
+    const material = this.fxMaterial(color, 0.9);
+    const node = new TransformNode(`fx-ring-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0.07, at.z);
+    node.scaling.setAll(0.2);
+    const ring = MeshBuilder.CreateTorus(`fx-ring-mesh-${this.fxSeq++}`, { diameter: 1, thickness: 0.05, tessellation: 36 }, this.scene);
+    ring.parent = node;
+    ring.material = material;
+    ring.isPickable = false;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'ring',
+      startScale: 0.2,
+      endScale: Math.max(0.4, diameter),
+      alpha: 0.9,
+    });
+  }
+
+  private spawnBeam(from: Vector3, to: Vector3, color: string, width: number, ttl: number): void {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.2) return;
+    const material = this.fxMaterial(color, 0.9);
+    const node = new TransformNode(`fx-beam-${this.fxSeq++}`, this.scene);
+    node.position.set((from.x + to.x) / 2, 0.72, (from.z + to.z) / 2);
+    node.rotation.y = Math.atan2(dx, dz);
+    const mesh = MeshBuilder.CreateBox(`fx-beam-mesh-${this.fxSeq++}`, { width, height: width, depth: distance }, this.scene);
+    mesh.parent = node;
+    mesh.material = material;
+    mesh.isPickable = false;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'beam',
+      alpha: 0.9,
+    });
+  }
+
+  private spawnProjectile(from: Vector3, to: Vector3, color: string, style: string, ttl: number): void {
+    const start = new Vector3(from.x, 0.68, from.z);
+    const end = new Vector3(to.x, 0.66, to.z);
+    const { node, material } = this.buildProjectileNode(style, color);
+    node.position.copyFrom(start);
+    node.rotation.y = Math.atan2(end.x - start.x, end.z - start.z);
+    const arc = style === 'rocket' ? 0.55 : style === 'flame' ? 0.16 : style === 'orb' || style === 'star' ? 0.22 : 0.04;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'projectile',
+      from: start,
+      to: end,
+      arc,
+      spin: style === 'orb' || style === 'bolt' || style === 'star' ? 7 : 0,
+      alpha: 0.95,
+    });
+  }
+
+  private buildProjectileNode(style: string, color: string): { node: TransformNode; material: StandardMaterial } {
+    const material = this.fxMaterial(color, 0.95);
+    const node = new TransformNode(`fx-projectile-${this.fxSeq++}`, this.scene);
+    const part = (mesh: Mesh): Mesh => {
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.isPickable = false;
+      return mesh;
+    };
+    if (style === 'arrow' || style === 'dagger') {
+      if (style === 'arrow') {
+        const shaft = MeshBuilder.CreateCylinder(`fx-proj-${this.fxSeq++}`, { diameter: 0.035, height: 0.34, tessellation: 6 }, this.scene);
+        shaft.rotation.x = Math.PI / 2;
+        shaft.position.z = 0.04;
+        part(shaft);
+        const tip = MeshBuilder.CreateCylinder(`fx-proj-${this.fxSeq++}`, { diameterTop: 0, diameterBottom: 0.09, height: 0.14, tessellation: 5 }, this.scene);
+        tip.rotation.x = Math.PI / 2;
+        tip.position.z = 0.28;
+        part(tip);
+        for (const sx of [-1, 1]) {
+          const feather = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.06, height: 0.01, depth: 0.1 }, this.scene);
+          feather.position.set(sx * 0.05, 0, -0.11);
+          feather.rotation.y = sx * 0.3;
+          part(feather);
+        }
+      } else {
+        const blade = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.035, height: 0.04, depth: 0.26 }, this.scene);
+        blade.position.z = 0.1;
+        part(blade);
+        const tip = MeshBuilder.CreateCylinder(`fx-proj-${this.fxSeq++}`, { diameterTop: 0, diameterBottom: 0.07, height: 0.1, tessellation: 4 }, this.scene);
+        tip.rotation.x = Math.PI / 2;
+        tip.position.z = 0.26;
+        part(tip);
+        const guard = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.16, height: 0.035, depth: 0.035 }, this.scene);
+        guard.position.z = -0.03;
+        part(guard);
+      }
+    } else if (style === 'flame') {
+      const outer = MeshBuilder.CreateCylinder(
+        `fx-proj-${this.fxSeq++}`,
+        { diameterTop: 0, diameterBottom: 0.2, height: 0.34, tessellation: 7 },
+        this.scene,
+      );
+      outer.rotation.x = Math.PI / 2;
+      outer.position.z = 0.1;
+      part(outer);
+      const core = MeshBuilder.CreateSphere(`fx-proj-${this.fxSeq++}`, { diameter: 0.14, segments: 6 }, this.scene);
+      core.position.z = -0.02;
+      part(core);
+    } else if (style === 'bullet') {
+      const bullet = MeshBuilder.CreateSphere(`fx-proj-${this.fxSeq++}`, { diameter: 0.13, segments: 7 }, this.scene);
+      part(bullet);
+      const trail = MeshBuilder.CreateCylinder(
+        `fx-proj-${this.fxSeq++}`,
+        { diameterTop: 0, diameterBottom: 0.1, height: 0.24, tessellation: 6 },
+        this.scene,
+      );
+      trail.rotation.x = -Math.PI / 2;
+      trail.position.z = -0.16;
+      part(trail);
+    } else if (style === 'rocket') {
+      const shell = MeshBuilder.CreateCylinder(
+        `fx-proj-${this.fxSeq++}`,
+        { diameter: 0.13, height: 0.3, tessellation: 8 },
+        this.scene,
+      );
+      shell.rotation.x = Math.PI / 2;
+      shell.position.z = 0.06;
+      part(shell);
+      const tip = MeshBuilder.CreateCylinder(
+        `fx-proj-${this.fxSeq++}`,
+        { diameterTop: 0, diameterBottom: 0.13, height: 0.15, tessellation: 6 },
+        this.scene,
+      );
+      tip.rotation.x = Math.PI / 2;
+      tip.position.z = 0.27;
+      part(tip);
+      for (const sx of [-1, 1]) {
+        const fin = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.02, height: 0.12, depth: 0.1 }, this.scene);
+        fin.position.set(sx * 0.06, 0, -0.08);
+        part(fin);
+      }
+    } else if (style === 'snow' || style === 'star') {
+      for (let i = 0; i < 3; i++) {
+        const ray = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.04, height: 0.28, depth: 0.04 }, this.scene);
+        ray.rotation.z = (i * Math.PI) / 3;
+        part(ray);
+      }
+      const core = MeshBuilder.CreateSphere(`fx-proj-${this.fxSeq++}`, { diameter: 0.13, segments: 6 }, this.scene);
+      part(core);
+    } else if (style === 'bolt') {
+      for (let i = 0; i < 3; i++) {
+        const seg = MeshBuilder.CreateBox(`fx-proj-${this.fxSeq++}`, { width: 0.07, height: 0.07, depth: 0.18 }, this.scene);
+        seg.position.set(i % 2 === 0 ? 0.04 : -0.04, 0, -i * 0.13);
+        seg.rotation.z = i % 2 === 0 ? 0.4 : -0.4;
+        part(seg);
+      }
+    } else {
+      const orb = MeshBuilder.CreateSphere(`fx-proj-${this.fxSeq++}`, { diameter: 0.18, segments: 8 }, this.scene);
+      part(orb);
+      const halo = MeshBuilder.CreateTorus(`fx-proj-${this.fxSeq++}`, { diameter: 0.28, thickness: 0.018, tessellation: 20 }, this.scene);
+      halo.rotation.x = Math.PI / 2;
+      part(halo);
+    }
+    return { node, material };
+  }
+
+  private spawnIcon(at: Vector3, shape: string, color: string, scale: number, height: number): void {
+    const material = this.fxMaterial(color, 0.95);
+    const node = new TransformNode(`fx-icon-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, height, at.z);
+    node.scaling.setAll(scale);
+    const addBox = (w: number, h: number, d: number, x: number, y: number, z = 0, rz = 0, ry = 0): Mesh => {
+      const mesh = MeshBuilder.CreateBox(`fx-icon-part-${this.fxSeq++}`, { width: w, height: h, depth: d }, this.scene);
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.position.set(x, y, z);
+      mesh.rotation.set(0, ry, rz);
+      mesh.isPickable = false;
+      return mesh;
+    };
+    const addSphere = (d: number, x: number, y: number, z = 0, sy = 1): Mesh => {
+      const mesh = MeshBuilder.CreateSphere(`fx-icon-part-${this.fxSeq++}`, { diameter: d, segments: 6 }, this.scene);
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.position.set(x, y, z);
+      mesh.scaling.y = sy;
+      mesh.isPickable = false;
+      return mesh;
+    };
+    const addCyl = (top: number, bottom: number, heightValue: number, x: number, y: number, z = 0, rx = 0, rz = 0, tessellation = 6): Mesh => {
+      const mesh = MeshBuilder.CreateCylinder(
+        `fx-icon-part-${this.fxSeq++}`,
+        { diameterTop: top, diameterBottom: bottom, height: heightValue, tessellation },
+        this.scene,
+      );
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.position.set(x, y, z);
+      mesh.rotation.set(rx, 0, rz);
+      mesh.isPickable = false;
+      return mesh;
+    };
+    const addTorus = (diameter: number, thickness: number, x: number, y: number, z = 0, rx = 0, rz = 0): Mesh => {
+      const mesh = MeshBuilder.CreateTorus(`fx-icon-part-${this.fxSeq++}`, { diameter, thickness, tessellation: 24 }, this.scene);
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.position.set(x, y, z);
+      mesh.rotation.set(rx, 0, rz);
+      mesh.isPickable = false;
+      return mesh;
+    };
+
+    switch (shape) {
+      case 'swords': {
+        addBox(0.055, 0.5, 0.05, -0.08, 0.04, 0, -0.55);
+        addBox(0.055, 0.5, 0.05, 0.08, 0.04, 0, 0.55);
+        addBox(0.16, 0.04, 0.06, -0.16, -0.2, 0);
+        addBox(0.16, 0.04, 0.06, 0.16, -0.2, 0);
+        addSphere(0.06, -0.2, 0.28);
+        addSphere(0.06, 0.2, 0.28);
+        break;
+      }
+      case 'shield': {
+        addBox(0.34, 0.38, 0.07, 0, 0);
+        addSphere(0.1, 0, 0.02, 0.05);
+        addBox(0.06, 0.26, 0.04, 0, 0, 0.06);
+        addBox(0.22, 0.06, 0.04, 0, 0.02, 0.06);
+        break;
+      }
+      case 'plus': {
+        addBox(0.34, 0.09, 0.06, 0, 0);
+        addBox(0.09, 0.34, 0.06, 0, 0);
+        addSphere(0.14, 0, 0, 0.05);
+        break;
+      }
+      case 'skull': {
+        addSphere(0.26, 0, 0.04, 0, 0.9);
+        addBox(0.16, 0.08, 0.12, 0, -0.14, 0.04);
+        addCyl(0, 0.05, 0.18, -0.1, 0.18, 0, 0, -0.4, 4);
+        addCyl(0, 0.05, 0.18, 0.1, 0.18, 0, 0, 0.4, 4);
+        break;
+      }
+      case 'snow': {
+        for (let i = 0; i < 3; i++) addBox(0.035, 0.36, 0.035, 0, 0, 0, (i * Math.PI) / 3);
+        addSphere(0.1, 0, 0, 0.02);
+        break;
+      }
+      case 'star': {
+        for (let i = 0; i < 3; i++) addBox(0.045, 0.38, 0.045, 0, 0, 0, (i * Math.PI) / 3);
+        addSphere(0.13, 0, 0, 0.02);
+        break;
+      }
+      case 'bolt': {
+        addBox(0.08, 0.22, 0.06, 0.06, 0.13, 0, 0.5);
+        addBox(0.08, 0.22, 0.06, -0.04, -0.02, 0, -0.5);
+        addBox(0.08, 0.22, 0.06, 0.05, -0.17, 0, 0.5);
+        break;
+      }
+      case 'flame': {
+        addCyl(0, 0.2, 0.4, 0, 0, 0);
+        addSphere(0.16, 0, -0.08, 0.02);
+        addCyl(0, 0.12, 0.22, -0.12, -0.04, 0, 0, -0.35);
+        addCyl(0, 0.12, 0.22, 0.12, -0.04, 0, 0, 0.35);
+        break;
+      }
+      case 'arrow': {
+        addBox(0.035, 0.36, 0.035, 0, -0.02);
+        addCyl(0, 0.09, 0.16, 0, 0.24);
+        addBox(0.08, 0.08, 0.03, -0.06, -0.2, 0, 0.6);
+        addBox(0.08, 0.08, 0.03, 0.06, -0.2, 0, -0.6);
+        break;
+      }
+      case 'claw':
+      case 'tusk': {
+        addBox(0.05, 0.3, 0.045, -0.11, 0.02, 0, -0.22);
+        addBox(0.05, 0.3, 0.045, 0, 0.02, 0);
+        addBox(0.05, 0.3, 0.045, 0.11, 0.02, 0, 0.22);
+        break;
+      }
+      case 'paw': {
+        addSphere(0.22, 0, -0.06, 0, 0.8);
+        addSphere(0.09, -0.1, 0.14, 0.02);
+        addSphere(0.09, 0, 0.17, 0.02);
+        addSphere(0.09, 0.1, 0.14, 0.02);
+        break;
+      }
+      case 'gear': {
+        addTorus(0.3, 0.07, 0, 0, 0, Math.PI / 2);
+        for (let i = 0; i < 6; i++) {
+          const angle = (i / 6) * Math.PI * 2;
+          addBox(0.1, 0.1, 0.07, Math.cos(angle) * 0.18, Math.sin(angle) * 0.18, 0, angle);
+        }
+        break;
+      }
+      case 'feather': {
+        addSphere(0.24, 0, 0.04, 0.01, 1.5);
+        addBox(0.03, 0.38, 0.03, 0, -0.04, 0, 0.18);
+        break;
+      }
+      case 'blades': {
+        addBox(0.05, 0.44, 0.05, -0.09, 0.02, 0, -0.7);
+        addBox(0.05, 0.44, 0.05, 0.09, 0.02, 0, 0.7);
+        addBox(0.16, 0.04, 0.06, -0.18, -0.18, 0);
+        addBox(0.16, 0.04, 0.06, 0.18, -0.18, 0);
+        break;
+      }
+      case 'dagger': {
+        addBox(0.045, 0.34, 0.05, 0, 0.04);
+        addBox(0.16, 0.04, 0.06, 0, -0.14);
+        addSphere(0.06, 0, -0.2, 0);
+        break;
+      }
+      case 'stun': {
+        addTorus(0.36, 0.04, 0, 0.02, 0, Math.PI / 2);
+        for (let i = 0; i < 3; i++) {
+          const angle = (i / 3) * Math.PI * 2;
+          addSphere(0.08, Math.cos(angle) * 0.2, Math.sin(angle) * 0.2 + 0.02, 0);
+        }
+        break;
+      }
+      case 'rocket': {
+        addCyl(0.13, 0.13, 0.3, 0, 0);
+        addCyl(0, 0.13, 0.16, 0, 0.22);
+        addBox(0.02, 0.12, 0.1, -0.08, -0.12);
+        addBox(0.02, 0.12, 0.1, 0.08, -0.12);
+        break;
+      }
+      case 'bullet': {
+        addSphere(0.13, 0, 0.04);
+        addCyl(0, 0.1, 0.2, 0, -0.16);
+        break;
+      }
+      default: {
+        for (let i = 0; i < 3; i++) addBox(0.045, 0.38, 0.045, 0, 0, 0, (i * Math.PI) / 3);
+        addSphere(0.13, 0, 0, 0.02);
+        break;
+      }
+    }
+
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: 950,
+      kind: 'icon',
+      base: node.position.clone(),
+      startScale: scale,
+      spin: 1.3,
+      rise: 0.42,
+      alpha: 0.95,
+    });
+  }
+
+  private animateCastFx(now: number): void {
+    for (let i = this.castFx.length - 1; i >= 0; i--) {
+      const fx = this.castFx[i];
+      const age = (now - fx.born) / fx.ttl;
+      if (age >= 1) {
+        fx.node.dispose(false, false);
+        fx.material.dispose();
+        this.castFx.splice(i, 1);
+        continue;
+      }
+      const t = Math.max(0, Math.min(1, age));
+      if (fx.kind === 'projectile' && fx.from && fx.to) {
+        fx.node.position.set(
+          fx.from.x + (fx.to.x - fx.from.x) * t,
+          fx.from.y + (fx.to.y - fx.from.y) * t + Math.sin(Math.PI * t) * (fx.arc ?? 0),
+          fx.from.z + (fx.to.z - fx.from.z) * t,
+        );
+        if (fx.spin) fx.node.rotation.z = t * fx.spin;
+      } else if (fx.kind === 'icon' && fx.base) {
+        fx.node.position.y = fx.base.y + (fx.rise ?? 0.35) * t;
+        fx.node.rotation.y = t * (fx.spin ?? 1.3);
+        const scale = (fx.startScale ?? 1) * (1 + Math.sin(t * Math.PI) * 0.14);
+        fx.node.scaling.setAll(scale);
+      } else if (fx.kind === 'ring') {
+        const scale = (fx.startScale ?? 0.2) + ((fx.endScale ?? 2) - (fx.startScale ?? 0.2)) * t;
+        fx.node.scaling.setAll(scale);
+      } else if (fx.kind === 'aura') {
+        const scale = (fx.startScale ?? 0.7) + ((fx.endScale ?? 1.15) - (fx.startScale ?? 0.7)) * t;
+        fx.node.scaling.setAll(scale);
+        fx.node.rotation.y = t * (fx.spin ?? 1.5);
+      } else if (fx.kind === 'beam') {
+        fx.node.scaling.x = 1 + Math.sin(t * Math.PI) * 0.35;
+      }
+      fx.material.alpha = (fx.alpha ?? 0.9) * (1 - t * t);
+    }
+  }
+
   private animateEnvironment(): void {
     for (const flame of this.flames) {
       const flicker =
@@ -1238,8 +1831,89 @@ export class ArenaScene {
     }
   }
 
+  private animateUnit(visual: UnitVisual, dt: number): void {
+    const model = visual.model;
+    if (visual.attackTimer > 0) visual.attackTimer = Math.max(0, visual.attackTimer - dt);
+    if (visual.castTimer > 0) visual.castTimer = Math.max(0, visual.castTimer - dt);
+    const t = this.time + visual.idleSeed;
+    const attacking = visual.attackTimer > 0;
+    const casting = visual.castTimer > 0;
+    const attackProgress = attacking ? 1 - visual.attackTimer / ATTACK_TIME : 0;
+    const castProgress = casting ? 1 - visual.castTimer / CAST_TIME : 0;
+    const swing = attacking ? Math.sin(attackProgress * Math.PI) : 0;
+    const cast = casting ? Math.sin(castProgress * Math.PI) : 0;
+    const bob = Math.sin(t * 2.4) * 0.018 + Math.sin(t * 4.1) * 0.006;
+    let forward = 0;
+    if (swing > 0) forward = model.attackStyle === 'ranged' ? -swing * 0.07 : swing * 0.12;
+    if (cast > 0) forward += cast * 0.04;
+
+    model.body.position.set(0, model.hover + bob, forward);
+    model.body.rotation.x = -cast * 0.1 + (model.attackStyle === 'beast' ? swing * 0.08 : 0);
+    model.body.rotation.z = Math.sin(t * 1.7) * 0.018 + (model.attackStyle === 'melee' ? swing * 0.07 : 0);
+    model.body.scaling.setAll(1 + cast * 0.05 + swing * 0.018);
+
+    if (model.weapon) {
+      let wx = model.weaponBase.x;
+      let wz = model.weaponBase.z;
+      if (swing > 0) {
+        if (model.attackStyle === 'melee') {
+          wx += swing * 0.35;
+          wz += swing * 1.7;
+        } else if (model.attackStyle === 'ranged') {
+          wx -= swing * 0.3;
+        } else if (model.attackStyle === 'magic') {
+          wx -= swing * 0.45;
+          wz += swing * 0.35;
+        } else {
+          wx += swing * 0.2;
+        }
+      }
+      if (cast > 0) {
+        wx -= cast * 0.95;
+        wz += cast * 0.25;
+      }
+      model.weapon.rotation.x = wx;
+      model.weapon.rotation.z = wz;
+    }
+
+    if (model.offhand) {
+      let ox = model.offhandBase.x;
+      let oz = model.offhandBase.z;
+      if (swing > 0) {
+        ox += swing * 0.3;
+        oz -= swing * 1.5;
+      }
+      if (cast > 0) {
+        ox -= cast * 0.7;
+        oz -= cast * 0.2;
+      }
+      model.offhand.rotation.x = ox;
+      model.offhand.rotation.z = oz;
+    }
+
+    if (model.head) {
+      let hx = model.headBase.x;
+      if (model.attackStyle === 'beast' && swing > 0) hx += swing * 0.45;
+      if (cast > 0) hx += cast * 0.25;
+      model.head.rotation.x = hx;
+    }
+
+    const flap = Math.sin(t * (casting ? 15 : 5)) * (casting ? 0.42 : 0.14);
+    for (const wing of model.wings) {
+      wing.node.rotation.z = wing.baseZ + wing.sign * (flap + 0.06);
+      wing.node.rotation.y = wing.sign * (casting ? cast * 0.3 : Math.sin(t * 3) * 0.04);
+    }
+
+    if (model.glow) {
+      const pulse = 1 + Math.sin(t * 5.5) * 0.12 + cast * 0.85 + swing * 0.25;
+      model.glow.scaling.setAll(model.glowBase * pulse);
+      model.glow.visibility = Math.min(1, 0.16 + cast * 0.5 + Math.abs(Math.sin(t * 6)) * 0.06);
+    }
+  }
+
   private animate(): void {
     this.animateEnvironment();
+    const dt = Math.min(0.06, this.engine.getDeltaTime() / 1000);
     for (const visual of this.unitVisuals.values()) {
       const dx = visual.target.x - visual.root.position.x;
       const dz = visual.target.z - visual.root.position.z;
@@ -1256,8 +1930,10 @@ export class ArenaScene {
         visual.selection.scaling.z = 1;
         visual.root.position.y *= 0.8;
       }
+      this.animateUnit(visual, dt);
     }
     const now = performance.now();
+    this.animateCastFx(now);
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const fx = this.effects[i];
       const age = (now - fx.born) / fx.ttl;
