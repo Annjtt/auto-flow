@@ -106,8 +106,8 @@ export class ShopPreview {
       `shop-preview-camera-${index}`,
       Math.PI / 2 + 0.42,
       1.16,
-      Math.max(2.3, model.height * 1.8),
-      new Vector3(0, model.height * 0.48, 0),
+      Math.max(1.7, model.height * 1.38),
+      new Vector3(0, model.height * 0.5, 0),
       this.scene,
     );
     camera.layerMask = mask;
