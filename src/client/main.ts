@@ -16,6 +16,7 @@ import {
 } from '../shared/types';
 import { Net } from './net';
 import { ArenaScene, type FloatTextKind } from './scene';
+import { ShopPreview } from './shopPreview';
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -124,6 +125,7 @@ const scene = new ArenaScene(canvas, {
   },
   onFloatText: spawnFloatText,
 });
+const shopPreview = new ShopPreview(byId<HTMLCanvasElement>('shopPreview'));
 
 function spawnFloatText(text: string, x: number, y: number, kind: FloatTextKind): void {
   if (floatLayer.childElementCount > 40) floatLayer.firstElementChild?.remove();
@@ -288,6 +290,8 @@ function resetToMenu(): void {
   gameOverShown = false;
   surrenderPending = false;
   scene.clearUnits();
+  shopPreview.setUnits([]);
+  shopSig = '';
   gameOver.classList.add('hidden');
   byId('spectatorBanner').classList.add('hidden');
   showScreen('menu');
@@ -596,7 +600,7 @@ function renderPlayers(): void {
             : '';
       return `
         <div class="${classes.join(' ')}" data-player-id="${escapeHtml(player.id)}" style="--streak:${streakLevel}">
-          ${player.streak >= 2 ? `<span class="streak-flare" aria-hidden="true">${'<i></i>'.repeat(6)}${'<b></b>'.repeat(12)}</span>` : ''}
+          ${player.streak >= 2 ? `<span class="streak-flare" aria-hidden="true">${'<i></i>'.repeat(3)}${'<b></b>'.repeat(12)}${'<s></s>'.repeat(4)}</span>` : ''}
           <div class="chip-head">
             <span class="chip-rank">${player.placement ?? index + 1}</span>
             <span class="chip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</span>
@@ -650,6 +654,7 @@ function unitCardMarkup(
   attributes: string,
   extraClass = '',
   upgradeReady = false,
+  previewIndex = -1,
 ): string {
   const mult = STAR_MULTIPLIER[star] ?? 1;
   const glow = `race-${def.race}`;
@@ -660,6 +665,7 @@ function unitCardMarkup(
       <div class="unit-stars">${star > 1 ? stars(star) : ''}</div>
       <div class="unit-name">${escapeHtml(def.name)}</div>
       <div class="unit-traits">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]}</div>
+      <div class="unit-preview" data-preview-index="${previewIndex}"></div>
       <div class="unit-stats">
         <span>HP <b>${formatNumber(def.hp * mult)}</b></span>
         <span>ATK <b>${formatNumber(def.attack * mult)}</b></span>
@@ -701,9 +707,10 @@ function renderShop(): void {
       const classes = [self.gold < def.cost ? 'poor' : '', upgradeReady ? 'upgrade-ready' : '']
         .filter(Boolean)
         .join(' ');
-      return unitCardMarkup(def, 1, `data-buy="${index}"`, classes, upgradeReady);
+      return unitCardMarkup(def, 1, `data-buy="${index}"`, classes, upgradeReady, index);
     })
     .join('');
+  shopPreview.setUnits(self.shop);
 }
 
 function renderBench(): void {
