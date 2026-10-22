@@ -766,6 +766,20 @@ export class Game {
     return this.players.find((p) => p.id === pairing.aId)?.name;
   }
 
+  private opponentIdFor(playerId: string): string | undefined {
+    if (this.phase === 'combat' || this.phase === 'result') {
+      const runtime = this.battles.find((b) => b.aId === playerId || b.bId === playerId);
+      if (runtime) {
+        if (runtime.aId === playerId) return runtime.bId ?? undefined;
+        return runtime.aId;
+      }
+    }
+    const pairing = this.pairings.find((entry) => entry.aId === playerId || entry.bId === playerId);
+    if (!pairing) return undefined;
+    if (pairing.aId === playerId) return pairing.bId ?? pairing.ghostId ?? undefined;
+    return pairing.aId;
+  }
+
   viewFor(playerId: string): RoomView {
     const self = this.players.find((p) => p.id === playerId) ?? null;
     const publicPlayers: PublicPlayer[] = this.players.map((p) => ({
@@ -821,6 +835,7 @@ export class Game {
       players: publicPlayers,
       self: selfView,
       opponentName: this.opponentNameFor(playerId),
+      opponentId: this.opponentIdFor(playerId),
     };
   }
 }

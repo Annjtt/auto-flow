@@ -24,6 +24,14 @@ export interface WingPart {
   sign: number;
 }
 
+export interface GradeOrb {
+  mesh: Mesh;
+  angle: number;
+  radius: number;
+  y: number;
+  speed: number;
+}
+
 export interface UnitModel {
   body: TransformNode;
   head: TransformNode | null;
@@ -38,6 +46,9 @@ export interface UnitModel {
   attackStyle: AttackStyle;
   hover: number;
   height: number;
+  gradeOrbs: GradeOrb[];
+  gradeHalo: Mesh | null;
+  gradeScale: number;
 }
 
 export interface ModelContext {
@@ -84,7 +95,7 @@ function fallbackPalette(def: UnitDef): UnitPalette {
   return byRace[def.race] ?? { body: '#b9a267', accent: '#8fa6c7', glow: '#ffe28a' };
 }
 
-export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string): UnitModel {
+export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string, star = 1): UnitModel {
   const palette = UNIT_PALETTES[def.id] ?? fallbackPalette(def);
   const body = new TransformNode(`model-${uid}`, ctx.scene);
   const parts = buildUnit(ctx, def, palette, body, uid);
@@ -93,6 +104,7 @@ export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string): U
   parts.weaponBase = parts.weapon ? parts.weapon.rotation.clone() : Vector3.Zero();
   parts.offhandBase = parts.offhand ? parts.offhand.rotation.clone() : Vector3.Zero();
   if (parts.glow) parts.glowBase = parts.glow.scaling.x || 1;
+  const grade = applyGrade(ctx, def, palette, body, parts.height, uid, star);
 
   return {
     body,
@@ -108,7 +120,96 @@ export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string): U
     attackStyle: parts.attackStyle,
     hover: parts.hover,
     height: parts.height,
+    gradeOrbs: grade.orbs,
+    gradeHalo: grade.halo,
+    gradeScale: grade.scale,
   };
+}
+
+function applyGrade(
+  ctx: ModelContext,
+  def: UnitDef,
+  palette: UnitPalette,
+  body: TransformNode,
+  height: number,
+  uid: string,
+  star: number,
+): { orbs: GradeOrb[]; halo: Mesh | null; scale: number } {
+  if (star < 2) return { orbs: [], halo: null, scale: 1 };
+
+  const tier = Math.min(3, Math.max(2, star));
+  const trimMat = ctx.material(
+    `${def.id}-gradeTrim-${tier}`,
+    tier >= 3 ? '#f5d98a' : '#cdbc8e',
+    tier >= 3 ? '#7a4a10' : '#4a3a18',
+  );
+  const gemMat = ctx.material(`${def.id}-gradeGem-${tier}`, palette.glow, palette.glow);
+  const scale = tier >= 3 ? 1.06 : 1.03;
+  const orbs: GradeOrb[] = [];
+  let seq = 0;
+  const name = (kind: string) => `${uid}-${def.id}-grade${tier}-${kind}-${seq++}`;
+
+  for (const sign of [-1, 1]) {
+    const crest = MeshBuilder.CreateCylinder(
+      name('crest'),
+      { diameterTop: 0.015, diameterBottom: 0.11, height: 0.18, tessellation: 4 },
+      ctx.scene,
+    );
+    crest.parent = body;
+    crest.material = trimMat;
+    crest.position.set(sign * 0.24, height * 0.43, 0.01);
+    crest.rotation.z = sign * -0.36;
+    crest.isPickable = false;
+  }
+
+  const gem = MeshBuilder.CreateSphere(name('gem'), { diameter: 0.085, segments: 8 }, ctx.scene);
+  gem.parent = body;
+  gem.material = gemMat;
+  gem.position.set(0, height * 0.42, 0.19);
+  gem.isPickable = false;
+
+  let halo: Mesh | null = null;
+  if (tier >= 3) {
+    halo = MeshBuilder.CreateTorus(
+      name('halo'),
+      { diameter: 0.24, thickness: 0.018, tessellation: 24 },
+      ctx.scene,
+    );
+    halo.parent = body;
+    halo.material = gemMat;
+    halo.position.set(0, height * 0.86, 0);
+    halo.isPickable = false;
+
+    for (const sign of [-1, 1]) {
+      const fin = MeshBuilder.CreateCylinder(
+        name('fin'),
+        { diameterTop: 0, diameterBottom: 0.14, height: 0.34, tessellation: 3 },
+        ctx.scene,
+      );
+      fin.parent = body;
+      fin.material = gemMat;
+      fin.position.set(sign * 0.2, height * 0.56, -0.18);
+      fin.rotation.set(-0.35, 0, sign * 0.5);
+      fin.isPickable = false;
+    }
+  }
+
+  const count = tier >= 3 ? 4 : 2;
+  for (let index = 0; index < count; index++) {
+    const orb = MeshBuilder.CreateSphere(name('orb'), { diameter: tier >= 3 ? 0.06 : 0.05, segments: 4 }, ctx.scene);
+    orb.parent = body;
+    orb.material = gemMat;
+    orb.isPickable = false;
+    orbs.push({
+      mesh: orb,
+      angle: (index / count) * Math.PI * 2,
+      radius: tier >= 3 ? 0.38 : 0.33,
+      y: height * (tier >= 3 ? 0.62 : 0.56),
+      speed: tier >= 3 ? 2.4 : 1.8,
+    });
+  }
+
+  return { orbs, halo, scale };
 }
 
 interface BuiltParts {

@@ -56,6 +56,7 @@ let gameOverShown = false;
 let surrenderPending = false;
 let currentScreen: 'menu' | 'lobby' | 'game' = 'menu';
 let lastTooltipDef: string | null = null;
+let lastTooltipPlayer: string | null = null;
 let shopSig = '';
 let benchSig = '';
 let selectedSig = '';
@@ -554,22 +555,61 @@ function updateClock(): void {
 
 function renderPlayers(): void {
   if (!room) return;
-  const sig = `${room.selfId}|${JSON.stringify(room.players)}`;
+  const maxLives = Math.max(1, room.settings.startingLives);
+  const sig = `${room.selfId}|${maxLives}|${room.opponentId ?? ''}|${JSON.stringify(room.players)}`;
   if (sig === playersSig) return;
   playersSig = sig;
-  playersPanel.innerHTML = room.players
-    .map((player) => {
+  const players = [...room.players].sort((a, b) => {
+    if (a.alive !== b.alive) return a.alive ? -1 : 1;
+    if (!a.alive) return (a.placement ?? 99) - (b.placement ?? 99);
+    if (a.lives !== b.lives) return b.lives - a.lives;
+    if (a.streak !== b.streak) return b.streak - a.streak;
+    return (a.placement ?? 99) - (b.placement ?? 99);
+  });
+  playersPanel.innerHTML = players
+    .map((player, index) => {
       const classes = ['player-chip'];
       if (player.id === room?.selfId) classes.push('self');
       if (!player.alive) classes.push('dead');
-      const place = player.placement ? `#${player.placement} ` : '';
+      const nextOpponent = player.id === room?.opponentId && player.id !== room?.selfId && player.alive;
+      if (nextOpponent) classes.push('next-opponent');
+      const hpPercent = Math.max(0, Math.min(100, (player.lives / maxLives) * 100));
+      if (hpPercent <= 25) classes.push('hp-low');
+      if (player.streak >= 2) {
+        classes.push('has-streak');
+        classes.push(
+          player.streak >= 8
+            ? 'streak-inferno'
+            : player.streak >= 5
+              ? 'streak-blaze'
+              : player.streak >= 3
+                ? 'streak-hot'
+                : 'streak-warm',
+        );
+      }
+      const streakLevel = Math.min(8, Math.max(0, player.streak));
+      const streak =
+        player.streak > 0
+          ? `<span class="chip-streak" title="Победная серия: ${player.streak}"><b>${player.streak}</b></span>`
+          : player.streak < 0
+            ? `<span class="chip-streak loss" title="Серия поражений: ${Math.abs(player.streak)}"><b>−${Math.abs(player.streak)}</b></span>`
+            : '';
       return `
-        <div class="${classes.join(' ')}">
-          <div>
-            <div class="chip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</div>
-            <div class="chip-meta">${place}ур. ${player.level}${player.streak !== 0 ? ` · ${player.streak > 0 ? 'побед' : 'пораж.'} ${Math.abs(player.streak)}` : ''}</div>
+        <div class="${classes.join(' ')}" data-player-id="${escapeHtml(player.id)}" style="--streak:${streakLevel}">
+          ${player.streak >= 2 ? `<span class="streak-flare" aria-hidden="true">${'<i></i>'.repeat(6)}${'<b></b>'.repeat(12)}</span>` : ''}
+          <div class="chip-head">
+            <span class="chip-rank">${player.placement ?? index + 1}</span>
+            <span class="chip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</span>
+            <span class="chip-lives">${player.lives}<small>/${maxLives}</small></span>
           </div>
-          <div class="chip-lives">${player.lives}</div>
+          <div class="chip-hp" role="progressbar" aria-valuemin="0" aria-valuemax="${maxLives}" aria-valuenow="${player.lives}" aria-label="Здоровье">
+            <span class="chip-hp-fill" style="width:${hpPercent.toFixed(1)}%"></span>
+          </div>
+          <div class="chip-foot">
+            ${streak}
+            ${nextOpponent ? '<span class="chip-opponent" title="Следующий соперник">соперник</span>' : ''}
+            <span class="chip-meta">ур. ${player.level}</span>
+          </div>
         </div>`;
     })
     .join('');
@@ -1058,6 +1098,9 @@ function showGameOver(
 function showTooltip(defId: string, star: number, x: number, y: number): void {
   const def = getUnitDef(defId);
   const mult = STAR_MULTIPLIER[star] ?? 1;
+  lastTooltipDef = defId;
+  lastTooltipPlayer = null;
+  tooltip.classList.remove('player-tip');
   tooltip.innerHTML = `
     <div class="tip-name">${escapeHtml(def.name)} ${star > 1 ? stars(star) : ''}</div>
     <div class="tip-meta">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]} · ${def.cost} золота</div>
@@ -1073,9 +1116,80 @@ function showTooltip(defId: string, star: number, x: number, y: number): void {
   positionTooltip(x, y);
 }
 
+function showPlayerTooltip(playerId: string, x: number, y: number): void {
+  if (!room) return;
+  const player = room.players.find((entry) => entry.id === playerId);
+  if (!player) return;
+  if (lastTooltipPlayer === playerId && !tooltip.classList.contains('hidden')) return;
+  lastTooltipDef = null;
+  lastTooltipPlayer = player.id;
+
+  const grouped = new Map<string, { count: number; topStar: number; cost: number }>();
+  const races = new Map<string, { name: string; count: number }>();
+  const classes = new Map<string, { name: string; count: number }>();
+  for (const unit of player.board) {
+    const def = getUnitDef(unit.defId);
+    const group = grouped.get(unit.defId);
+    if (group) {
+      group.count += 1;
+      group.topStar = Math.max(group.topStar, unit.star);
+    } else {
+      grouped.set(unit.defId, { count: 1, topStar: unit.star, cost: def.cost });
+    }
+    const race = races.get(def.race);
+    if (race) race.count += 1;
+    else races.set(def.race, { name: RACE_NAMES[def.race], count: 1 });
+    const unitClass = classes.get(def.unitClass);
+    if (unitClass) unitClass.count += 1;
+    else classes.set(def.unitClass, { name: CLASS_NAMES[def.unitClass], count: 1 });
+  }
+
+  const unitRows = [...grouped.entries()]
+    .sort((a, b) => b[1].cost - a[1].cost || b[1].count - a[1].count)
+    .map(([defId, info]) => {
+      const def = getUnitDef(defId);
+      const starText = info.topStar > 1 ? ` <span class="tip-unit-stars">${stars(info.topStar)}</span>` : '';
+      return `
+        <div class="tip-unit-row">
+          <span>${escapeHtml(def.name)}${starText}</span>
+          <span class="tip-unit-count">×${info.count}</span>
+        </div>`;
+    })
+    .join('');
+  const formatGroup = (groups: Map<string, { name: string; count: number }>) =>
+    [...groups.values()]
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .map((entry) => `${escapeHtml(entry.name)} ${entry.count}`)
+      .join(' · ');
+  const raceText = formatGroup(races);
+  const classText = formatGroup(classes);
+  const place = player.placement ? ` · место ${player.placement}` : '';
+  const status = player.alive ? '' : ' · выбыл';
+  const streakText =
+    player.streak > 0
+      ? ` · серия ${player.streak}`
+      : player.streak < 0
+        ? ` · поражений ${Math.abs(player.streak)}`
+        : '';
+
+  tooltip.classList.add('player-tip');
+  tooltip.innerHTML = `
+    <div class="tip-player-head">
+      <div class="tip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</div>
+      <div class="tip-lives">${player.lives} ${livesWord(player.lives)}</div>
+    </div>
+    <div class="tip-meta">ур. ${player.level}${place}${streakText}${status}</div>
+    <div class="tip-comp-title">Состав · ${player.board.length}</div>
+    <div class="tip-units">${unitRows || '<div class="tip-empty">Поле пустое</div>'}</div>
+    <div class="tip-synergy-row"><span>Расы</span><b>${raceText || '—'}</b></div>
+    <div class="tip-synergy-row"><span>Классы</span><b>${classText || '—'}</b></div>`;
+  tooltip.classList.remove('hidden');
+  positionTooltip(x, y);
+}
+
 function positionTooltip(x: number, y: number): void {
-  const width = 260;
-  const height = 190;
+  const width = tooltip.offsetWidth || 260;
+  const height = tooltip.offsetHeight || 190;
   let left = x + 16;
   let top = y + 16;
   if (left + width > window.innerWidth - 10) left = x - width - 16;
@@ -1086,7 +1200,9 @@ function positionTooltip(x: number, y: number): void {
 
 function hideTooltip(): void {
   tooltip.classList.add('hidden');
+  tooltip.classList.remove('player-tip');
   lastTooltipDef = null;
+  lastTooltipPlayer = null;
 }
 
 // ---------- Drag & drop ----------
@@ -1249,17 +1365,28 @@ selectedPanel.addEventListener('click', (event) => {
 });
 
 document.addEventListener('pointerover', (event) => {
+  const playerTarget = (event.target as HTMLElement).closest('[data-player-id]') as HTMLElement | null;
+  if (playerTarget?.dataset.playerId) {
+    const rect = playerTarget.getBoundingClientRect();
+    showPlayerTooltip(playerTarget.dataset.playerId, rect.left + rect.width / 2, rect.top);
+    return;
+  }
   const target = (event.target as HTMLElement).closest('[data-def]') as HTMLElement | null;
   if (!target || !target.dataset.def) return;
   const star = Number(target.dataset.star ?? 1);
-  lastTooltipDef = target.dataset.def;
   const rect = target.getBoundingClientRect();
   showTooltip(target.dataset.def, star, rect.left + rect.width / 2, rect.top);
 });
 
 document.addEventListener('pointerout', (event) => {
-  const target = (event.target as HTMLElement).closest('[data-def]') as HTMLElement | null;
-  if (target && lastTooltipDef) hideTooltip();
+  const from = (event.target as HTMLElement).closest('[data-def], [data-player-id]') as HTMLElement | null;
+  if (!from) return;
+  const to =
+    event.relatedTarget instanceof Element
+      ? (event.relatedTarget.closest('[data-def], [data-player-id]') as HTMLElement | null)
+      : null;
+  if (to === from) return;
+  hideTooltip();
 });
 
 document.addEventListener('pointermove', (event) => {

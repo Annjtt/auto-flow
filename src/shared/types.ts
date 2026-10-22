@@ -137,6 +137,7 @@ export interface RoomView {
   players: PublicPlayer[];
   self: SelfView | null;
   opponentName?: string;
+  opponentId?: string;
 }
 
 export interface LobbySummary {

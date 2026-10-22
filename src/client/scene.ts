@@ -16,6 +16,7 @@ import '@babylonjs/core/Meshes/Builders/planeBuilder';
 import '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import '@babylonjs/core/Meshes/Builders/torusBuilder';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents';
 import { Scene } from '@babylonjs/core/scene';
@@ -95,12 +96,16 @@ const PROJECTILE_STYLES: Record<string, string> = {
 
 const ATTACK_TIME = 0.34;
 const CAST_TIME = 0.82;
+const METER_WIDTH = 0.62;
+const METER_Y_GAP = 0.078;
+const STAR_Y_GAP = 0.16;
 
 const GROUND_Y = -1.15;
 
 interface UnitVisual {
   root: TransformNode;
   hpFill: Mesh;
+  hpTrail: Mesh;
   manaFill: Mesh;
   selection: Mesh;
   defId: string;
@@ -112,6 +117,12 @@ interface UnitVisual {
   attackTimer: number;
   castTimer: number;
   idleSeed: number;
+  hpTarget: number;
+  hpDisplay: number;
+  hpTrailRatio: number;
+  manaTarget: number;
+  manaDisplay: number;
+  gradeStars: Mesh[];
 }
 
 interface FxVisual {
@@ -1007,10 +1018,12 @@ export class ArenaScene {
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
       visual.root.position = visual.target.clone();
       visual.root.setEnabled(unit.uid !== this.draggedUid);
-      visual.hpFill.scaling.x = 1;
-      visual.hpFill.position.x = 0;
-      visual.manaFill.scaling.x = 0.001;
-      visual.manaFill.position.x = -0.29;
+      visual.hpTarget = 1;
+      visual.hpDisplay = 1;
+      visual.hpTrailRatio = 1;
+      visual.manaTarget = 0;
+      visual.manaDisplay = 0;
+      this.applyMeters(visual);
       const selected = unit.uid === selectedUid;
       visual.selection.setEnabled(selected);
       visual.selected = selected;
@@ -1034,6 +1047,7 @@ export class ArenaScene {
     }
     for (const unit of snapshot.units) {
       let visual = this.unitVisuals.get(unit.uid);
+      let fresh = false;
       if (!visual || visual.defId !== unit.defId || visual.star !== unit.star) {
         if (visual) visual.root.dispose();
         visual = this.createUnitVisual(
@@ -1042,16 +1056,19 @@ export class ArenaScene {
         );
         visual.root.position = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
         this.unitVisuals.set(unit.uid, visual);
+        fresh = true;
       }
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
       visual.selection.setEnabled(false);
       visual.root.setEnabled(unit.alive);
-      const hpRatio = Math.max(0, Math.min(1, unit.hp / unit.maxHp));
-      visual.hpFill.scaling.x = Math.max(0.001, hpRatio);
-      visual.hpFill.position.x = -(0.58 * (1 - hpRatio)) / 2;
-      const manaRatio = unit.maxMana > 0 ? Math.max(0, Math.min(1, unit.mana / unit.maxMana)) : 0;
-      visual.manaFill.scaling.x = Math.max(0.001, manaRatio);
-      visual.manaFill.position.x = -(0.58 * (1 - manaRatio)) / 2;
+      visual.hpTarget = Math.max(0, Math.min(1, unit.hp / unit.maxHp));
+      visual.manaTarget = unit.maxMana > 0 ? Math.max(0, Math.min(1, unit.mana / unit.maxMana)) : 0;
+      if (fresh) {
+        visual.hpDisplay = visual.hpTarget;
+        visual.hpTrailRatio = visual.hpTarget;
+        visual.manaDisplay = visual.manaTarget;
+        this.applyMeters(visual);
+      }
     }
     for (const effect of snapshot.effects) {
       if (this.seenEffects.has(effect.id)) continue;
@@ -1130,6 +1147,7 @@ export class ArenaScene {
       },
       def,
       unit.uid,
+      unit.star,
     );
     model.body.parent = root;
     model.body.rotation.y = team === 0 ? Math.PI : 0;
@@ -1150,43 +1168,75 @@ export class ArenaScene {
     selection.setEnabled(false);
 
     const barY = Math.max(1.2, model.height);
-    for (let i = 0; i < unit.star; i++) {
-      const pip = MeshBuilder.CreateSphere(`pip-${unit.uid}-${i}`, { diameter: 0.1, segments: 6 }, this.scene);
-      pip.parent = root;
-      pip.position = new Vector3((i - (unit.star - 1) / 2) * 0.14, barY - 0.16, 0);
-      pip.material = starMat;
-      pip.isPickable = false;
-    }
+    const hpFrameMat = this.material('hpFrame', '#04060b');
+    const hpTrackMat = this.material(team === 0 ? 'hpTrackA' : 'hpTrackB', team === 0 ? '#13351f' : '#341216');
+    const hpTrailMat = this.material('hpTrail', '#e8a35c', '#7a3a10');
+    const manaFrameMat = this.material('manaFrame', '#030711');
+    const manaTrackMat = this.material('manaTrack', '#071629');
 
-    const hpBg = MeshBuilder.CreatePlane(`hpBg-${unit.uid}`, { width: 0.66, height: 0.09 }, this.scene);
+    const hpFrame = MeshBuilder.CreatePlane(`hpFrame-${unit.uid}`, { width: 0.7, height: 0.1 }, this.scene);
+    hpFrame.parent = root;
+    hpFrame.position = new Vector3(0, barY, 0);
+    hpFrame.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    hpFrame.material = hpFrameMat;
+    hpFrame.isPickable = false;
+    const hpBg = MeshBuilder.CreatePlane(`hpBg-${unit.uid}`, { width: 0.66, height: 0.068 }, this.scene);
     hpBg.parent = root;
-    hpBg.position = new Vector3(0, barY, 0);
+    hpBg.position = new Vector3(0, barY, 0.001);
     hpBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    hpBg.material = this.material('hpBg', '#220d12');
+    hpBg.material = hpTrackMat;
     hpBg.isPickable = false;
-    const hpFill = MeshBuilder.CreatePlane(`hp-${unit.uid}`, { width: 0.58, height: 0.05 }, this.scene);
+    const hpTrail = MeshBuilder.CreatePlane(`hpTrail-${unit.uid}`, { width: METER_WIDTH, height: 0.05 }, this.scene);
+    hpTrail.parent = root;
+    hpTrail.position = new Vector3(0, barY, 0.002);
+    hpTrail.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    hpTrail.material = hpTrailMat;
+    hpTrail.isPickable = false;
+    const hpFill = MeshBuilder.CreatePlane(`hp-${unit.uid}`, { width: METER_WIDTH, height: 0.05 }, this.scene);
     hpFill.parent = root;
-    hpFill.position = new Vector3(0, barY, 0.002);
+    hpFill.position = new Vector3(0, barY, 0.003);
     hpFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
     hpFill.material = this.material(team === 0 ? 'hpA' : 'hpB', team === 0 ? '#5fc06f' : '#d45555', team === 0 ? '#1d5a29' : '#651b1b');
     hpFill.isPickable = false;
 
-    const manaBg = MeshBuilder.CreatePlane(`manaBg-${unit.uid}`, { width: 0.66, height: 0.06 }, this.scene);
+    const manaFrame = MeshBuilder.CreatePlane(`manaFrame-${unit.uid}`, { width: 0.7, height: 0.06 }, this.scene);
+    manaFrame.parent = root;
+    manaFrame.position = new Vector3(0, barY - METER_Y_GAP, 0);
+    manaFrame.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    manaFrame.material = manaFrameMat;
+    manaFrame.isPickable = false;
+    const manaBg = MeshBuilder.CreatePlane(`manaBg-${unit.uid}`, { width: 0.66, height: 0.04 }, this.scene);
     manaBg.parent = root;
-    manaBg.position = new Vector3(0, barY - 0.07, 0);
+    manaBg.position = new Vector3(0, barY - METER_Y_GAP, 0.001);
     manaBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    manaBg.material = this.material('manaBg', '#071527');
+    manaBg.material = manaTrackMat;
     manaBg.isPickable = false;
-    const manaFill = MeshBuilder.CreatePlane(`mana-${unit.uid}`, { width: 0.58, height: 0.03 }, this.scene);
+    const manaFill = MeshBuilder.CreatePlane(`mana-${unit.uid}`, { width: METER_WIDTH, height: 0.03 }, this.scene);
     manaFill.parent = root;
-    manaFill.position = new Vector3(0, barY - 0.07, 0.002);
+    manaFill.position = new Vector3(0, barY - METER_Y_GAP, 0.002);
     manaFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
     manaFill.material = this.material('mana', '#4d9fff', '#1d4f9c');
     manaFill.isPickable = false;
 
+    const gradeStars: Mesh[] = [];
+    if (unit.star >= 2) {
+      const gradeMat = this.gradeStarMaterial(unit.star);
+      const outer = unit.star >= 3 ? 0.076 : 0.066;
+      const spacing = unit.star >= 3 ? 0.17 : 0.16;
+      for (let i = 0; i < unit.star; i++) {
+        const starMesh = this.createStarMesh(`gstar-${unit.uid}-${i}`, outer, outer * 0.42, gradeMat);
+        starMesh.parent = root;
+        starMesh.position = new Vector3((i - (unit.star - 1) / 2) * spacing, barY + STAR_Y_GAP, 0.01);
+        starMesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
+        starMesh.isPickable = false;
+        gradeStars.push(starMesh);
+      }
+    }
+
     return {
       root,
       hpFill,
+      hpTrail,
       manaFill,
       selection,
       defId: unit.defId,
@@ -1198,7 +1248,60 @@ export class ArenaScene {
       attackTimer: 0,
       castTimer: 0,
       idleSeed: Math.random() * Math.PI * 2,
+      hpTarget: 1,
+      hpDisplay: 1,
+      hpTrailRatio: 1,
+      manaTarget: 0,
+      manaDisplay: 0,
+      gradeStars,
     };
+  }
+
+  private gradeStarMaterial(star: number): StandardMaterial {
+    const material = this.material(
+      star >= 3 ? 'gradeStar3' : 'gradeStar2',
+      star >= 3 ? '#fff2bd' : '#f0d89a',
+      star >= 3 ? '#ffad1f' : '#b9861f',
+    );
+    material.backFaceCulling = false;
+    material.disableLighting = true;
+    return material;
+  }
+
+  private createStarMesh(name: string, outer: number, inner: number, material: StandardMaterial): Mesh {
+    const points = 10;
+    const positions = [0, 0, 0];
+    const indices: number[] = [];
+    for (let i = 0; i < points; i++) {
+      const angle = Math.PI / 2 + (i * Math.PI) / 5;
+      const radius = i % 2 === 0 ? outer : inner;
+      positions.push(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+    }
+    for (let i = 0; i < points; i++) {
+      indices.push(0, 1 + i, 1 + ((i + 1) % points));
+    }
+    const normals: number[] = [];
+    VertexData.ComputeNormals(positions, indices, normals);
+    const mesh = new Mesh(name, this.scene);
+    const data = new VertexData();
+    data.positions = positions;
+    data.indices = indices;
+    data.normals = normals;
+    data.applyToMesh(mesh);
+    mesh.material = material;
+    return mesh;
+  }
+
+  private applyMeters(visual: UnitVisual): void {
+    this.setMeterFill(visual.hpFill, visual.hpDisplay);
+    this.setMeterFill(visual.hpTrail, Math.max(visual.hpDisplay, visual.hpTrailRatio));
+    this.setMeterFill(visual.manaFill, visual.manaDisplay);
+  }
+
+  private setMeterFill(mesh: Mesh, ratio: number): void {
+    const clamped = Math.max(0.001, Math.min(1, ratio));
+    mesh.scaling.x = clamped;
+    mesh.position.x = -(METER_WIDTH * (1 - clamped)) / 2;
   }
 
   private spawnEffect(kind: string, x: number, y: number, team: number, id: string): void {
@@ -1850,7 +1953,7 @@ export class ArenaScene {
     model.body.position.set(0, model.hover + bob, forward);
     model.body.rotation.x = -cast * 0.1 + (model.attackStyle === 'beast' ? swing * 0.08 : 0);
     model.body.rotation.z = Math.sin(t * 1.7) * 0.018 + (model.attackStyle === 'melee' ? swing * 0.07 : 0);
-    model.body.scaling.setAll(1 + cast * 0.05 + swing * 0.018);
+    model.body.scaling.setAll(model.gradeScale * (1 + cast * 0.05 + swing * 0.018));
 
     if (model.weapon) {
       let wx = model.weaponBase.x;
@@ -1909,6 +2012,30 @@ export class ArenaScene {
       model.glow.scaling.setAll(model.glowBase * pulse);
       model.glow.visibility = Math.min(1, 0.16 + cast * 0.5 + Math.abs(Math.sin(t * 6)) * 0.06);
     }
+
+    for (const orb of model.gradeOrbs) {
+      const angle = t * orb.speed + orb.angle;
+      orb.mesh.position.set(
+        Math.cos(angle) * orb.radius,
+        orb.y + Math.sin(t * 2.2 + orb.angle) * 0.025,
+        Math.sin(angle) * orb.radius,
+      );
+      orb.mesh.rotation.x += dt * 1.6;
+      orb.mesh.rotation.y += dt * 2.2;
+    }
+    if (model.gradeHalo) model.gradeHalo.rotation.y += dt * 0.9;
+    for (let i = 0; i < visual.gradeStars.length; i++) {
+      visual.gradeStars[i].scaling.setAll(1 + Math.sin(t * 3.2 + i * 1.7) * 0.055);
+    }
+
+    visual.hpDisplay += (visual.hpTarget - visual.hpDisplay) * Math.min(1, dt * 16);
+    if (visual.hpTarget >= visual.hpTrailRatio) {
+      visual.hpTrailRatio = visual.hpTarget;
+    } else {
+      visual.hpTrailRatio = Math.max(visual.hpTarget, visual.hpTrailRatio - dt * 0.55);
+    }
+    visual.manaDisplay += (visual.manaTarget - visual.manaDisplay) * Math.min(1, dt * 14);
+    this.applyMeters(visual);
   }
 
   private animate(): void {
