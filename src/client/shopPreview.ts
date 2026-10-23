@@ -102,20 +102,47 @@ export class ShopPreview {
       mesh.isPickable = false;
     }
 
+    const bounds = this.measure(model);
     const camera = new ArcRotateCamera(
       `shop-preview-camera-${index}`,
       Math.PI / 2 + 0.42,
       1.16,
-      Math.max(1.7, model.height * 1.38),
-      new Vector3(0, model.height * 0.5, 0),
+      Math.max(1.3, bounds.height * 1.48),
+      new Vector3(bounds.center.x, bounds.center.y, bounds.center.z),
       this.scene,
     );
     camera.layerMask = mask;
     camera.fov = 0.72;
-    camera.minZ = 0.1;
+    camera.minZ = 0.05;
     camera.maxZ = 30;
 
     return { defId, model, camera };
+  }
+
+  private measure(model: UnitModel): { center: Vector3; height: number } {
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (const mesh of model.body.getChildMeshes()) {
+      mesh.computeWorldMatrix(true);
+      const box = mesh.getBoundingInfo().boundingBox;
+      minX = Math.min(minX, box.minimumWorld.x);
+      minY = Math.min(minY, box.minimumWorld.y);
+      minZ = Math.min(minZ, box.minimumWorld.z);
+      maxX = Math.max(maxX, box.maximumWorld.x);
+      maxY = Math.max(maxY, box.maximumWorld.y);
+      maxZ = Math.max(maxZ, box.maximumWorld.z);
+    }
+    if (!Number.isFinite(minY)) {
+      return { center: new Vector3(0, model.height * 0.5, 0), height: model.height };
+    }
+    return {
+      center: new Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+      height: Math.max(0.4, maxY - minY),
+    };
   }
 
   private disposeSlot(slot: PreviewSlot): void {
