@@ -1298,9 +1298,9 @@ input:focus {
   --flame-c: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMCA1MCcgcHJlc2VydmVBc3BlY3RSYXRpbz0nbm9uZSc+PHBhdGggZmlsbD0nYmxhY2snIGQ9J00xNSA1MCBDNyA1MCAyIDQ1IDMgMzggQzQgMzMgNyAzMCA5IDI3IEM1IDI2IDIgMjMgMiAxOSBDNSAyMSA4IDIxIDEwIDIwIEM4IDE1IDkgOSAxNCAzIEMxMyA4IDEzIDEyIDE1IDE1IEMxNiA5IDE5IDQgMjMgMSBDMjEgNyAyMCAxMSAyMCAxNSBDMjMgMTMgMjYgMTAgMjggNiBDMjggMTIgMjYgMTggMjIgMjIgQzI2IDIzIDI5IDIyIDMwIDIwIEMyOSAyNiAyNiAzMCAyMiAzMyBDMjYgMzUgMjkgMzggMjggNDMgQzI3IDQ4IDIyIDUwIDE2IDUwIFonLz48L3N2Zz4=");
   --flame-body: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMCA1MCcgcHJlc2VydmVBc3BlY3RSYXRpbz0nbm9uZSc+PHBhdGggZmlsbD0nYmxhY2snIGQ9J00xNSA1MCBDOCA1MCAzIDQ2IDMgMzkgQzMgMzMgNiAzMCA4IDI1IEMxMCAyMCA4IDE1IDEwIDEwIEMxMiA1IDE0IDMgMTUgMCBDMTYgMyAxOSA1IDIxIDEwIEMyMyAxNSAyMSAyMCAyMyAyNSBDMjUgMzAgMjggMzMgMjcgMzkgQzI3IDQ2IDIyIDUwIDE1IDUwIFonLz48L3N2Zz4=");
   position: absolute;
-  top: -4px;
-  left: -2px;
-  bottom: -4px;
+  top: -2px;
+  left: -12px;
+  bottom: -2px;
   z-index: 0;
   width: calc(15px + var(--streak, 2) * 1.4px);
   pointer-events: none;
