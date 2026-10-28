@@ -3,82 +3,119 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0a1120" />
+    <meta name="theme-color" content="#080a0e" />
     <title>Auto Flow — автошахматы</title>
-    <script type="module" crossorigin src="/assets/index-Bzy6F5aW.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D1D1gL8M.css">
+    <script type="module" crossorigin src="/assets/index-BU7_MoXw.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CsD4EvFg.css">
   </head>
-  <body>
+  <body data-map="jaddy">
     <div id="app">
       <div class="ambient-glow ambient-a"></div>
       <div class="ambient-glow ambient-b"></div>
       <div id="connection" class="connection-badge">Соединение...</div>
 
       <section id="menu-screen" class="screen active">
-        <header class="brand">
-          <div class="brand-mark">
-            <span class="brand-rune"></span>
-            <span>AUTO<span>FLOW</span></span>
+        <div class="menu-atmosphere" aria-hidden="true">
+          <span class="orbit orbit-a"></span>
+          <span class="orbit orbit-b"></span>
+          <span class="sigil sigil-a"></span>
+          <span class="sigil sigil-b"></span>
+        </div>
+
+        <header class="menu-head">
+          <div class="brand">
+            <div class="brand-mark">
+              <span class="brand-rune"></span>
+              <span>AUTO<span>FLOW</span></span>
+            </div>
+            <div class="brand-sub">Тактические автошахматы · онлайн-арена</div>
           </div>
-          <div class="brand-sub">Арена автошахмат · мультиплеер · ИИ</div>
+          <div class="menu-head-meta">
+            <span class="season-chip"><i></i>Сезон I</span>
+            <span class="menu-version">версия 0.1.0</span>
+          </div>
         </header>
 
-        <div class="menu-layout">
-          <article class="menu-card hero-card">
-            <div class="eyebrow">Тактическая автошахматная арена</div>
-            <h1>Соберите отряд.<br /><em>Переиграйте всех.</em></h1>
-            <p class="hero-copy">
-              Покупайте бойцов, открывайте синергии рас и классов, повышайте звёзды и
-              выставляйте армию. Бойцы сражаются сами — побеждает стратегия.
-            </p>
-            <div class="name-row">
-              <label for="playerName">Ваше имя</label>
-              <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Странник" />
-            </div>
-            <div class="menu-actions">
-              <button id="quickPlay" class="btn btn-primary btn-large">
-                <span>Быстрый бой с ИИ</span>
-                <small>Соло против ботов</small>
+        <div class="menu-shell">
+          <aside class="menu-rail">
+            <div class="profile-card panel">
+              <div class="profile-crest" aria-hidden="true"><span></span></div>
+              <div class="profile-field">
+                <label for="playerName">Ваше имя</label>
+                <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Странник" />
+              </div>
+              <div class="profile-stats">
+                <div><b>6</b><span>рас</span></div>
+                <div><b>24</b><span>бойца</span></div>
+                <div><b>8</b><span>игроков</span></div>
+              </div>
+              <button id="quickPlay" class="menu-action primary" type="button">
+                <span class="menu-action-icon swords" aria-hidden="true"></span>
+                <span class="menu-action-copy"><b>Быстрый бой</b><small>Соло против ИИ</small></span>
               </button>
-              <button id="openCreate" class="btn btn-large">
-                <span>Создать лобби</span>
-                <small>Свои правила и код</small>
+              <button id="openCreate" class="menu-action" type="button">
+                <span class="menu-action-icon banner" aria-hidden="true"></span>
+                <span class="menu-action-copy"><b>Создать лобби</b><small>Свои правила и код</small></span>
               </button>
             </div>
-            <div class="feature-strip">
-              <div><b>6</b><span>рас</span></div>
-              <div><b>24</b><span>бойца</span></div>
-              <div><b>8×8</b><span>арена</span></div>
-              <div><b>до 8</b><span>игроков</span></div>
-            </div>
-          </article>
 
-          <article class="menu-card join-card">
-            <div class="card-heading">
-              <h2>Войти в зал</h2>
-              <span class="ornament"></span>
+            <div class="join-card panel">
+              <div class="rail-heading"><span>Войти в зал</span><i></i></div>
+              <div class="join-row">
+                <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
+                <button id="joinBtn" class="btn btn-primary" type="button">Войти</button>
+              </div>
+              <p class="rail-note">Пятизначный код от хозяина зала. Игра идёт в реальном времени.</p>
             </div>
-            <div class="join-row">
-              <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
-              <button id="joinBtn" class="btn btn-primary">Войти</button>
-            </div>
-            <div class="card-heading lobby-heading">
-              <h2>Публичные залы</h2>
-              <button id="refreshLobbies" class="text-button" type="button">Обновить</button>
-            </div>
-            <div id="lobbyList" class="lobby-list">
-              <div class="empty-state">Пока нет открытых лобби.<br />Создайте своё!</div>
-            </div>
-            <div class="menu-tip">
+
+            <div class="rail-tip">
               <span class="tip-icon">i</span>
-              <p>Пригласите друзей по пятизначному коду. Игра идёт в реальном времени в браузере.</p>
+              <p>Перетаскивайте бойцов по полю — светящаяся нить покажет маршрут прыжка.</p>
             </div>
-          </article>
+          </aside>
+
+          <main class="menu-main">
+            <section class="menu-hero">
+              <span class="eyebrow">Автошахматы · мультиплеер · ИИ</span>
+              <h1>Соберите отряд.<br /><em>Заберите арену.</em></h1>
+              <p class="hero-copy">
+                Покупайте бойцов, открывайте синергии рас и классов, повышайте звёзды
+                и выставляйте армию. Бойцы сражаются сами — побеждает стратегия.
+              </p>
+              <div class="hero-runes" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+            </section>
+
+            <section class="map-select">
+              <header class="section-head">
+                <div>
+                  <span class="section-kicker">Select chessboard</span>
+                  <h2>Выберите доску</h2>
+                </div>
+                <span class="section-note">4 арены · влияет только на поле боя</span>
+              </header>
+              <div id="mapGrid" class="map-grid"></div>
+            </section>
+
+            <section class="lobbies-panel">
+              <header class="section-head">
+                <div>
+                  <span class="section-kicker">Открытые залы</span>
+                  <h2>Публичные лобби</h2>
+                </div>
+                <button id="refreshLobbies" class="text-button" type="button">Обновить</button>
+              </header>
+              <div id="lobbyList" class="lobby-list">
+                <div class="empty-state">Пока нет открытых лобби.<br />Создайте своё!</div>
+              </div>
+            </section>
+          </main>
         </div>
 
         <footer class="menu-footer">
-          <span>Auto Flow · Babylon.js · серверная симуляция боя</span>
-          <span>Нажмите на бойца, затем на клетку, чтобы выставить его на поле.</span>
+          <span>Auto Flow · автошахматы · серверная симуляция боя</span>
+          <span>Нажмите на бойца, затем на клетку — или перетащите его на поле.</span>
         </footer>
       </section>
 
@@ -97,7 +134,7 @@
         </header>
 
         <div class="lobby-layout">
-          <div class="lobby-main menu-card">
+          <div class="lobby-main panel">
             <div class="card-heading">
               <h2>Участники</h2>
               <span id="lobbyCount" class="muted"></span>
@@ -110,13 +147,17 @@
             <div id="lobbySettings" class="settings-grid"></div>
 
             <div class="lobby-actions">
-              <button id="readyBtn" class="btn">Готов</button>
-              <button id="startBtn" class="btn btn-primary">Начать матч</button>
+              <button id="readyBtn" class="btn" type="button">Готов</button>
+              <button id="startBtn" class="btn btn-primary" type="button">Начать матч</button>
             </div>
             <p id="lobbyHint" class="lobby-hint"></p>
           </div>
 
-          <aside class="lobby-side menu-card">
+          <aside class="lobby-side panel">
+            <div class="lobby-board-preview" id="lobbyBoardPreview" data-map="jaddy">
+              <span class="lobby-board-label">Ваша доска</span>
+              <b id="lobbyBoardName">Jaddy Forest</b>
+            </div>
             <h2>Как играть</h2>
             <ol class="how-list">
               <li><b>Покупайте</b> бойцов в магазине. Три копии одного бойца сливаются в звёздное улучшение.</li>
@@ -134,52 +175,112 @@
       <section id="game-screen" class="screen">
         <canvas id="renderCanvas" touch-action="none"></canvas>
         <div class="game-overlay">
-          <header class="game-hud">
-            <div class="self-stats">
-              <div class="stat stat-lives"><b id="hudLives">30</b><span>жизни</span></div>
-              <div class="stat stat-gold"><b id="hudGold">0</b><span>золото</span></div>
-              <div class="stat stat-level">
-                <b id="hudLevel">2</b><span>уровень</span>
-                <i><em id="hudXpFill"></em></i>
+          <header class="hud-top">
+            <div class="hud-cluster hud-left">
+              <div class="round-plaque">
+                <span class="round-kicker">Раунд</span>
+                <div class="round-value"><b id="hudRound">1</b><i>/ <span id="hudMaxRounds">24</span></i></div>
+                <div id="hudPhaseCard" class="round-phase">
+                  <span class="phase-dot"></span>
+                  <span id="hudPhaseLabel">подготовка</span>
+                  <b id="hudTimer">32</b>
+                </div>
               </div>
-              <div class="stat stat-phase"><b id="hudTimer">32</b><span id="hudPhaseLabel">подготовка</span></div>
+              <div id="hudOpponent" class="opponent-line">Соперник определится в бою</div>
             </div>
-            <div class="round-info">
-              <div class="round-ornament"></div>
-              <span>Раунд</span>
-              <strong><span id="hudRound">1</span> / <span id="hudMaxRounds">24</span></strong>
-              <div class="round-ornament"></div>
+
+            <div class="hud-cluster hud-center">
+              <div class="focus-badge" title="Бойцов на поле / лимит уровня">
+                <svg class="focus-ring" viewBox="0 0 100 100" aria-hidden="true">
+                  <circle class="focus-ring-track" cx="50" cy="50" r="44"></circle>
+                  <circle id="hudFocusRing" class="focus-ring-fill" cx="50" cy="50" r="44"></circle>
+                </svg>
+                <div class="focus-core"><b id="hudUnitCount">0</b><span>/<span id="hudLevelCap">2</span></span></div>
+                <span class="focus-label">отряд</span>
+              </div>
             </div>
-            <div class="hud-side">
-              <div id="playersPanel" class="players-panel"></div>
-              <div class="match-controls">
-                <button id="rulesBtn" class="btn btn-mini match-btn" type="button">Правила</button>
-                <button id="surrenderBtn" class="btn btn-mini match-btn btn-danger" type="button">Сдаться</button>
+
+            <div class="hud-cluster hud-right">
+              <div class="resource-pill gold">
+                <span class="res-icon coin" aria-hidden="true"></span>
+                <b id="hudGold">0</b>
+                <small>золото</small>
+              </div>
+              <div class="resource-pill lives">
+                <span class="res-icon heart" aria-hidden="true"></span>
+                <b id="hudLives">30</b>
+                <small>жизни</small>
+              </div>
+              <div class="hud-buttons">
+                <button id="rulesBtn" class="icon-btn" type="button" title="Правила" aria-label="Правила">?</button>
+                <button id="surrenderBtn" class="icon-btn danger" type="button" title="Сдаться" aria-label="Сдаться">✕</button>
               </div>
             </div>
           </header>
 
+          <aside id="playersPanel" class="players-panel"></aside>
           <aside id="synergyPanel" class="synergy-panel"></aside>
           <div id="selectedPanel" class="selected-panel hidden"></div>
           <div id="phaseBanner" class="phase-banner"></div>
           <div id="battleResult" class="battle-result hidden"></div>
           <div id="floatLayer" class="float-layer"></div>
 
-          <div id="shopBar" class="shop-bar">
-            <div class="shop-side">
-              <div class="shop-title">Магазин</div>
-              <button id="xpBtn" class="btn btn-mini" type="button">Опыт <b>4</b></button>
-              <button id="rerollBtn" class="btn btn-mini" type="button">Обновить <b>2</b></button>
-              <button id="lockBtn" class="btn btn-mini" type="button">Замок</button>
-              <div id="lockState" class="lock-state"></div>
+          <div id="shopBar" class="shop-bar hidden">
+            <div class="shop-frame">
+              <header class="shop-head">
+                <div class="shop-title">
+                  <span class="shop-rune" aria-hidden="true"></span>
+                  <b>Магазин</b>
+                  <small id="shopLevel">Ур. 1</small>
+                </div>
+                <div id="shopOdds" class="shop-odds"></div>
+                <div class="shop-head-actions">
+                  <div class="shop-gold"><span class="res-icon coin" aria-hidden="true"></span><b id="shopGold">0</b></div>
+                  <button id="shopCloseBtn" class="icon-btn close" type="button" title="Закрыть магазин" aria-label="Закрыть магазин">✕</button>
+                </div>
+              </header>
+
+              <div class="shop-body">
+                <button id="lockBtn" class="shop-round lock" type="button" title="Замок магазина">
+                  <span class="round-glyph lock-glyph" aria-hidden="true"></span>
+                  <small id="lockState">замок</small>
+                </button>
+                <div id="shopCards" class="shop-cards"></div>
+                <button id="rerollBtn" class="shop-round reroll" type="button" title="Обновить магазин">
+                  <span class="round-glyph refresh-glyph" aria-hidden="true"></span>
+                  <small>2</small>
+                </button>
+                <canvas id="shopPreview" class="shop-preview"></canvas>
+              </div>
             </div>
-            <div id="shopCards" class="shop-cards"></div>
-            <canvas id="shopPreview" class="shop-preview"></canvas>
           </div>
 
-          <div id="benchBar" class="bench-bar">
-            <div class="bench-label">Скамья <span id="benchCount"></span></div>
-            <div id="benchCards" class="bench-cards"></div>
+          <div class="board-dock">
+            <div class="dock-side dock-left">
+              <button id="xpBtn" class="xp-button" type="button" title="Купить опыт">
+                <span class="xp-orb"><b id="hudLevel">2</b></span>
+                <span class="xp-body">
+                  <span class="xp-title">Опыт <i>4</i></span>
+                  <span class="xp-track"><em id="hudXpFill"></em></span>
+                  <small id="hudXpText">0 / 4</small>
+                </span>
+              </button>
+            </div>
+
+            <div id="benchBar" class="bench-bar">
+              <div class="bench-head">
+                <span>Скамья</span>
+                <b id="benchCount">0 / 9</b>
+              </div>
+              <div id="benchCards" class="bench-cards"></div>
+            </div>
+
+            <div class="dock-side dock-right">
+              <button id="shopToggleBtn" class="shop-toggle" type="button" title="Открыть магазин">
+                <span class="bag-glyph" aria-hidden="true"></span>
+                <span class="shop-toggle-copy"><b>Магазин</b><small>B</small></span>
+              </button>
+            </div>
           </div>
 
           <div id="spectatorBanner" class="spectator-banner hidden">

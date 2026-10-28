@@ -117,6 +117,232 @@ const MANA_TEX_HEIGHT = 24;
 
 const GROUND_Y = -1.15;
 
+export type MapId = 'kara' | 'starry' | 'ruins' | 'jaddy';
+
+interface MapTheme {
+  label: string;
+  accent: string;
+  sky: string;
+  fog: string;
+  fogDensity: number;
+  hemiDiffuse: string;
+  hemiGround: string;
+  hemiIntensity: number;
+  dirDiffuse: string;
+  dirIntensity: number;
+  glow: number;
+  tiles: {
+    playerLight: string;
+    playerDark: string;
+    enemyLight: string;
+    enemyDark: string;
+  };
+  mats: Record<string, [string, string]>;
+}
+
+const MAP_THEMES: Record<MapId, MapTheme> = {
+  kara: {
+    label: 'Upper Tower Kara',
+    accent: '#b07cff',
+    sky: '#05050b',
+    fog: '#080810',
+    fogDensity: 0.016,
+    hemiDiffuse: '#9a92d8',
+    hemiGround: '#120f20',
+    hemiIntensity: 0.78,
+    dirDiffuse: '#ded8ff',
+    dirIntensity: 1.1,
+    glow: 0.5,
+    tiles: {
+      playerLight: '#c9cde3',
+      playerDark: '#373252',
+      enemyLight: '#acb1cc',
+      enemyDark: '#27243d',
+    },
+    mats: {
+      warStone: ['#2b2839', '#0a0910'],
+      warStoneDark: ['#17161f', '#060509'],
+      warBasalt: ['#110f18', '#040305'],
+      warIron: ['#252230', '#09080c'],
+      warRust: ['#3d2d50', '#120a1a'],
+      warBrass: ['#b79952', '#3a2a0c'],
+      warEmber: ['#6b3cc0', '#a76bff'],
+      boardRivet: ['#c3a86a', '#2a1e08'],
+      islandGround: ['#211e2c', '#07060b'],
+      islandCourt: ['#14121d', '#040309'],
+      islandRock: ['#2a2635', '#090810'],
+      islandRockDark: ['#14121c', '#040308'],
+      islandMoss: ['#2a3a39', '#080f0e'],
+      shoreSand: ['#565068', '#0b0910'],
+      ruinBone: ['#6c6682', '#171420'],
+      ruinRust: ['#4a3354', '#170a1e'],
+      warMetal: ['#282433', '#08070b'],
+      brazierFlame: ['#c79aff', '#9b5cff'],
+      starMat: ['#c1d2ff', '#bcd4ff'],
+      bloodMoon: ['#3a2f57', '#8060c0'],
+      seaWater: ['#0b1022', '#03050d'],
+      moonHalo: ['#2f2548', '#6c4bb0'],
+      moteEmber: ['#7c4ec0', '#c08bff'],
+      moteAsh: ['#625d74', '#a9a3bf'],
+      shoreFoam: ['#6b7fc4', '#8fa8e8'],
+    },
+  },
+  starry: {
+    label: 'Starry Court',
+    accent: '#7fd7ff',
+    sky: '#050e18',
+    fog: '#071624',
+    fogDensity: 0.012,
+    hemiDiffuse: '#a9c6e6',
+    hemiGround: '#101b26',
+    hemiIntensity: 0.9,
+    dirDiffuse: '#eaf3ff',
+    dirIntensity: 1.32,
+    glow: 0.42,
+    tiles: {
+      playerLight: '#e6edf5',
+      playerDark: '#7f95ab',
+      enemyLight: '#d6e2ee',
+      enemyDark: '#6b8298',
+    },
+    mats: {
+      warStone: ['#4a5666', '#141a21'],
+      warStoneDark: ['#2c3542', '#0b1016'],
+      warBasalt: ['#1c232c', '#06090d'],
+      warIron: ['#39424f', '#10151b'],
+      warRust: ['#6a5a3f', '#1c1409'],
+      warBrass: ['#d2b064', '#3d2c08'],
+      warEmber: ['#3b7fb5', '#7fd7ff'],
+      boardRivet: ['#d8c07a', '#2c230d'],
+      islandGround: ['#3d4a55', '#0c1116'],
+      islandCourt: ['#22303c', '#080d12'],
+      islandRock: ['#46525f', '#11171d'],
+      islandRockDark: ['#26303a', '#090d11'],
+      islandMoss: ['#38564a', '#0b1512'],
+      shoreSand: ['#9aa6ad', '#1a2026'],
+      ruinBone: ['#c6cbd2', '#282c31'],
+      ruinRust: ['#7a6444', '#221809'],
+      warMetal: ['#3c4553', '#10141a'],
+      brazierFlame: ['#ffd98a', '#ffb84a'],
+      starMat: ['#dbeaff', '#eaf4ff'],
+      bloodMoon: ['#b9d4ea', '#e6f4ff'],
+      seaWater: ['#0a2740', '#03101c'],
+      moonHalo: ['#496f8a', '#8fd2ff'],
+      moteEmber: ['#6aa0c4', '#aee6ff'],
+      moteAsh: ['#7c8a95', '#c2d4de'],
+      shoreFoam: ['#a6d8e8', '#d8f2fb'],
+    },
+  },
+  ruins: {
+    label: 'Shatty Ruins',
+    accent: '#e8ae63',
+    sky: '#140f0b',
+    fog: '#1d1610',
+    fogDensity: 0.015,
+    hemiDiffuse: '#e0c49c',
+    hemiGround: '#2a1c12',
+    hemiIntensity: 0.86,
+    dirDiffuse: '#ffe0ac',
+    dirIntensity: 1.35,
+    glow: 0.34,
+    tiles: {
+      playerLight: '#d9c4a4',
+      playerDark: '#8a6a4c',
+      enemyLight: '#cfb894',
+      enemyDark: '#7d5f43',
+    },
+    mats: {
+      warStone: ['#6b533c', '#1d140c'],
+      warStoneDark: ['#4a3729', '#120c08'],
+      warBasalt: ['#2e231b', '#0a0704'],
+      warIron: ['#3a3029', '#0f0b08'],
+      warRust: ['#7a4b2f', '#251006'],
+      warBrass: ['#c29a58', '#3a2608'],
+      warEmber: ['#a55a22', '#ff9a4a'],
+      boardRivet: ['#c6a36a', '#2c1e08'],
+      islandGround: ['#7a5e42', '#221508'],
+      islandCourt: ['#4a3928', '#140d07'],
+      islandRock: ['#6a533c', '#1c1209'],
+      islandRockDark: ['#3e3024', '#0f0a06'],
+      islandMoss: ['#4e5a35', '#141a0a'],
+      shoreSand: ['#b59a70', '#241c10'],
+      ruinBone: ['#cbb896', '#2a2419'],
+      ruinRust: ['#7a4b2f', '#1f0e05'],
+      warMetal: ['#453a31', '#120e0a'],
+      brazierFlame: ['#ffb45e', '#ff7b1c'],
+      starMat: ['#f5e0b0', '#ffe9b8'],
+      bloodMoon: ['#d8b070', '#f2c27a'],
+      seaWater: ['#2a3a3a', '#0b1414'],
+      moonHalo: ['#6a533c', '#c69a58'],
+      moteEmber: ['#a5702f', '#ffc46a'],
+      moteAsh: ['#8a7a62', '#c9b696'],
+      shoreFoam: ['#d8c3a2', '#efdfc0'],
+    },
+  },
+  jaddy: {
+    label: 'Jaddy Forest',
+    accent: '#7de09a',
+    sky: '#07120e',
+    fog: '#0a1a12',
+    fogDensity: 0.013,
+    hemiDiffuse: '#9fd2ad',
+    hemiGround: '#0c1c12',
+    hemiIntensity: 0.92,
+    dirDiffuse: '#e0ffd6',
+    dirIntensity: 1.22,
+    glow: 0.4,
+    tiles: {
+      playerLight: '#a7c994',
+      playerDark: '#4f7350',
+      enemyLight: '#9cbd8a',
+      enemyDark: '#436446',
+    },
+    mats: {
+      warStone: ['#3d4a37', '#0d130c'],
+      warStoneDark: ['#26301f', '#080c07'],
+      warBasalt: ['#18211a', '#050805'],
+      warIron: ['#2c352a', '#0a0f0a'],
+      warRust: ['#4d5a33', '#141a0a'],
+      warBrass: ['#b39a4e', '#302606'],
+      warEmber: ['#3c7d4a', '#7de09a'],
+      boardRivet: ['#b7a35a', '#251e08'],
+      islandGround: ['#2e452f', '#0a1209'],
+      islandCourt: ['#1b2b1d', '#060c07'],
+      islandRock: ['#3a4c38', '#0c110b'],
+      islandRockDark: ['#202b21', '#070a07'],
+      islandMoss: ['#4f7a3f', '#12220c'],
+      shoreSand: ['#8d8a56', '#1c1a0c'],
+      ruinBone: ['#9aa888', '#1d2418'],
+      ruinRust: ['#59663a', '#181d0a'],
+      warMetal: ['#2e3a2d', '#0a0e09'],
+      brazierFlame: ['#b9ff8a', '#79e06a'],
+      starMat: ['#cfefb0', '#e2ffc8'],
+      bloodMoon: ['#9fd28a', '#c8f0a8'],
+      seaWater: ['#0b2c2a', '#03100f'],
+      moonHalo: ['#3f6a4a', '#7ed69c'],
+      moteEmber: ['#4c8a4a', '#9aff8a'],
+      moteAsh: ['#6a8a6a', '#b6d8b0'],
+      shoreFoam: ['#7fd8b0', '#b0f0d4'],
+    },
+  },
+};
+
+export const MAP_THEME_ACCENTS: Record<MapId, string> = {
+  kara: MAP_THEMES.kara.accent,
+  starry: MAP_THEMES.starry.accent,
+  ruins: MAP_THEMES.ruins.accent,
+  jaddy: MAP_THEMES.jaddy.accent,
+};
+
+interface DragPathFx {
+  material: StandardMaterial;
+  dots: Mesh[];
+  ring: Mesh;
+  arrowRoot: TransformNode;
+  arrow: Mesh;
+  active: boolean;
+}
+
 interface UnitLeap {
   from: Vector3;
   to: Vector3;
@@ -211,12 +437,19 @@ export class ArenaScene {
   private time = 0;
   private materials = new Map<string, StandardMaterial>();
   private glowLayer: GlowLayer | null = null;
+  private hemi: HemisphericLight | null = null;
+  private dir: DirectionalLight | null = null;
+  private shoreFoamMat: StandardMaterial | null = null;
+  private mapId: MapId;
+  private dragPathFx: DragPathFx | null = null;
+  private dropJumps = new Map<string, Vector3>();
   private flames: { mesh: Mesh; light: PointLight | null; phase: number }[] = [];
   private motes: { mesh: Mesh; baseX: number; baseZ: number; phase: number; speed: number }[] = [];
 
-  constructor(canvas: HTMLCanvasElement, callbacks: ArenaCallbacks) {
+  constructor(canvas: HTMLCanvasElement, callbacks: ArenaCallbacks, mapId: MapId = 'jaddy') {
     this.canvas = canvas;
     this.callbacks = callbacks;
+    this.mapId = mapId;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.03, 0.052, 0.096, 1);
@@ -239,11 +472,13 @@ export class ArenaScene {
     hemi.intensity = 0.85;
     hemi.diffuse = new Color3(0.6, 0.7, 0.95);
     hemi.groundColor = new Color3(0.15, 0.12, 0.22);
+    this.hemi = hemi;
 
     const dir = new DirectionalLight('dir', new Vector3(-0.5, -1, -0.35), this.scene);
     dir.position = new Vector3(8, 14, 8);
     dir.intensity = 1.25;
     dir.diffuse = new Color3(1, 0.9, 0.75);
+    this.dir = dir;
 
     const glow = new GlowLayer('glow', this.scene);
     glow.intensity = 0.38;
@@ -251,6 +486,7 @@ export class ArenaScene {
 
     this.buildEnvironment();
     this.buildArena();
+    this.applyTheme();
     this.setupPointer();
     this.engine.runRenderLoop(() => {
       this.time += this.engine.getDeltaTime() / 1000;
@@ -495,12 +731,12 @@ export class ArenaScene {
     beach.material = sand;
     beach.isPickable = false;
 
-    const foamMat = new StandardMaterial('shoreFoamMat', this.scene);
+    const foamMat = this.material('shoreFoam', '#a6d8e8', '#d8f2fb');
     foamMat.disableLighting = true;
     foamMat.diffuseColor = Color3.Black();
-    foamMat.emissiveColor = new Color3(0.42, 0.76, 0.78);
     foamMat.alpha = 0.2;
     foamMat.backFaceCulling = false;
+    this.shoreFoamMat = foamMat;
     for (const [diameter, thickness, fade] of [
       [27.5, 0.08, 1],
       [31, 0.06, 0.7],
@@ -643,6 +879,304 @@ export class ArenaScene {
     moonHalo.material = this.material('moonHalo', '#3a1210', '#8a2b1d');
     moonHalo.visibility = 0.4;
     moonHalo.isPickable = false;
+
+    this.buildMapDecor();
+  }
+
+  private buildMapDecor(): void {
+    const rock = this.material('islandRock', '#37342c');
+    const rockDark = this.material('islandRockDark', '#1e1d1a');
+    const bone = this.material('ruinBone', '#645b4c');
+    const moss = this.material('islandMoss', '#2f3d2d');
+    const brass = this.material('warBrass', '#8b6a2f');
+    const glow = this.material('warEmber', '#7a2a10');
+
+    let seed = 419;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+
+    if (this.mapId === 'kara') {
+      for (let i = 0; i < 7; i++) {
+        const angle = (i / 7) * Math.PI * 2 + 0.16;
+        const radius = 12.2 + rand() * 3.4;
+        const height = 5.5 + rand() * 5.5;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const tower = MeshBuilder.CreateCylinder(
+          `karaTower-${i}`,
+          { diameterTop: 0.9 + rand() * 0.5, diameterBottom: 2 + rand() * 1.2, height, tessellation: 6 },
+          this.scene,
+        );
+        tower.position.set(x, GROUND_Y + height / 2 - 0.4, z);
+        tower.rotation.y = rand() * Math.PI;
+        tower.material = i % 3 === 0 ? rockDark : rock;
+        tower.isPickable = false;
+
+        const cap = MeshBuilder.CreateCylinder(
+          `karaTowerCap-${i}`,
+          { diameterTop: 0, diameterBottom: 1.5 + rand() * 0.5, height: 2.2, tessellation: 5 },
+          this.scene,
+        );
+        cap.position.set(x, GROUND_Y + height + 0.7, z);
+        cap.rotation.y = rand() * Math.PI;
+        cap.material = rockDark;
+        cap.isPickable = false;
+
+        const crystal = MeshBuilder.CreateSphere(
+          `karaCrystal-${i}`,
+          { diameter: 0.5 + rand() * 0.24, segments: 6 },
+          this.scene,
+        );
+        crystal.position.set(x, GROUND_Y + height + 1.5, z);
+        crystal.scaling.y = 1.8;
+        crystal.material = glow;
+        crystal.isPickable = false;
+      }
+      for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2 + 0.7;
+        const x = Math.cos(angle) * 8.6;
+        const z = Math.sin(angle) * 8.6;
+        const pillar = MeshBuilder.CreateBox(
+          `karaPillar-${i}`,
+          { width: 0.62, height: 3.1 + rand() * 0.7, depth: 0.62 },
+          this.scene,
+        );
+        pillar.position.set(x, GROUND_Y + 1.55, z);
+        pillar.rotation.y = angle;
+        pillar.material = rockDark;
+        pillar.isPickable = false;
+        const rune = MeshBuilder.CreateTorus(
+          `karaRune-${i}`,
+          { diameter: 0.7, thickness: 0.035, tessellation: 32 },
+          this.scene,
+        );
+        rune.position.set(x, GROUND_Y + 2.7, z);
+        rune.rotation.x = Math.PI / 2;
+        rune.material = brass;
+        rune.isPickable = false;
+      }
+    } else if (this.mapId === 'starry') {
+      for (let i = 0; i < 9; i++) {
+        const angle = (i / 9) * Math.PI * 2 + 0.24;
+        const radius = 9.4 + rand() * 3.6;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const height = 1.6 + rand() * 1.8;
+        const trunk = MeshBuilder.CreateCylinder(
+          `starryTrunk-${i}`,
+          { diameterTop: 0.2, diameterBottom: 0.4, height, tessellation: 6 },
+          this.scene,
+        );
+        trunk.position.set(x, GROUND_Y + height / 2, z);
+        trunk.material = brass;
+        trunk.isPickable = false;
+        for (let layer = 0; layer < 3; layer++) {
+          const canopy = MeshBuilder.CreateSphere(
+            `starryCanopy-${i}-${layer}`,
+            { diameter: 1.5 - layer * 0.34, segments: 8 },
+            this.scene,
+          );
+          canopy.position.set(
+            x + (rand() - 0.5) * 0.4,
+            GROUND_Y + height + 0.2 + layer * 0.55,
+            z + (rand() - 0.5) * 0.4,
+          );
+          canopy.scaling.y = 0.72;
+          canopy.material = brass;
+          canopy.isPickable = false;
+        }
+        const orb = MeshBuilder.CreateSphere(
+          `starryOrb-${i}`,
+          { diameter: 0.28 + rand() * 0.2, segments: 6 },
+          this.scene,
+        );
+        orb.position.set(x, GROUND_Y + height + 2.2 + rand() * 0.8, z);
+        orb.material = glow;
+        orb.isPickable = false;
+      }
+      for (let i = 0; i < 3; i++) {
+        const ring = MeshBuilder.CreateTorus(
+          `starryRing-${i}`,
+          { diameter: 12 + i * 2.4, thickness: 0.035, tessellation: 64 },
+          this.scene,
+        );
+        ring.position.y = GROUND_Y + 0.05 + i * 0.02;
+        ring.material = brass;
+        ring.visibility = 0.35 - i * 0.07;
+        ring.isPickable = false;
+      }
+    } else if (this.mapId === 'ruins') {
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2 + 0.43;
+        const radius = 9.8 + rand() * 3.2;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const segments = 2 + Math.floor(rand() * 3);
+        let y = GROUND_Y;
+        for (let segment = 0; segment < segments; segment++) {
+          const height = 0.7 + rand() * 0.9;
+          const piece = MeshBuilder.CreateCylinder(
+            `ruinPillar-${i}-${segment}`,
+            { diameterTop: 0.55 - segment * 0.05, diameterBottom: 0.72, height, tessellation: 7 },
+            this.scene,
+          );
+          piece.position.set(x + (rand() - 0.5) * 0.12, y + height / 2, z + (rand() - 0.5) * 0.12);
+          piece.rotation.z = (rand() - 0.5) * 0.16;
+          piece.material = segment === segments - 1 ? bone : rock;
+          piece.isPickable = false;
+          y += height;
+        }
+        if (rand() > 0.45) {
+          const slab = MeshBuilder.CreateBox(
+            `ruinSlab-${i}`,
+            { width: 1.6 + rand() * 1.2, height: 0.18, depth: 0.7 + rand() * 0.5 },
+            this.scene,
+          );
+          slab.position.set(x + 0.7, GROUND_Y + 0.24, z + 0.5);
+          slab.rotation.y = rand() * Math.PI;
+          slab.rotation.z = 0.12;
+          slab.material = bone;
+          slab.isPickable = false;
+        }
+      }
+      for (let i = 0; i < 6; i++) {
+        const angle = rand() * Math.PI * 2;
+        const radius = 7.2 + rand() * 2.2;
+        const rubble = MeshBuilder.CreateBox(
+          `ruinRubble-${i}`,
+          { width: 0.5 + rand() * 0.7, height: 0.3 + rand() * 0.4, depth: 0.5 + rand() * 0.6 },
+          this.scene,
+        );
+        rubble.position.set(Math.cos(angle) * radius, GROUND_Y + 0.2, Math.sin(angle) * radius);
+        rubble.rotation.y = rand() * Math.PI;
+        rubble.material = rand() > 0.5 ? bone : rockDark;
+        rubble.isPickable = false;
+      }
+    } else {
+      for (let i = 0; i < 13; i++) {
+        const angle = (i / 13) * Math.PI * 2 + rand() * 0.25;
+        const radius = 9.2 + rand() * 4.4;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const height = 2 + rand() * 2.6;
+        const trunk = MeshBuilder.CreateCylinder(
+          `jaddyTrunk-${i}`,
+          { diameterTop: 0.24, diameterBottom: 0.52, height, tessellation: 6 },
+          this.scene,
+        );
+        trunk.position.set(x, GROUND_Y + height / 2, z);
+        trunk.rotation.z = (rand() - 0.5) * 0.14;
+        trunk.material = rockDark;
+        trunk.isPickable = false;
+        for (let layer = 0; layer < 3; layer++) {
+          const canopy = MeshBuilder.CreateSphere(
+            `jaddyCanopy-${i}-${layer}`,
+            { diameter: 2.1 - layer * 0.4, segments: 8 },
+            this.scene,
+          );
+          canopy.position.set(
+            x + (rand() - 0.5) * 0.8,
+            GROUND_Y + height + layer * 0.5,
+            z + (rand() - 0.5) * 0.8,
+          );
+          canopy.scaling.y = 0.8;
+          canopy.material = moss;
+          canopy.isPickable = false;
+        }
+      }
+      for (let i = 0; i < 10; i++) {
+        const angle = rand() * Math.PI * 2;
+        const radius = 7.4 + rand() * 1.9;
+        const bush = MeshBuilder.CreateSphere(
+          `jaddyBush-${i}`,
+          { diameter: 0.8 + rand() * 0.9, segments: 7 },
+          this.scene,
+        );
+        bush.position.set(Math.cos(angle) * radius, GROUND_Y + 0.25, Math.sin(angle) * radius);
+        bush.scaling.y = 0.55;
+        bush.material = moss;
+        bush.isPickable = false;
+      }
+    }
+  }
+
+  private applyTheme(): void {
+    const theme = MAP_THEMES[this.mapId];
+    const sky = Color3.FromHexString(theme.sky);
+    this.scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
+    this.scene.fogColor = Color3.FromHexString(theme.fog);
+    this.scene.fogDensity = theme.fogDensity;
+    if (this.hemi) {
+      this.hemi.diffuse = Color3.FromHexString(theme.hemiDiffuse);
+      this.hemi.groundColor = Color3.FromHexString(theme.hemiGround);
+      this.hemi.intensity = theme.hemiIntensity;
+    }
+    if (this.dir) {
+      this.dir.diffuse = Color3.FromHexString(theme.dirDiffuse);
+      this.dir.intensity = theme.dirIntensity;
+    }
+    if (this.glowLayer) this.glowLayer.intensity = theme.glow;
+    for (const [key, [diffuse, emissive]] of Object.entries(theme.mats)) {
+      const mat = this.materials.get(key);
+      if (!mat) continue;
+      mat.diffuseColor = Color3.FromHexString(diffuse);
+      mat.emissiveColor = Color3.FromHexString(emissive);
+    }
+    const tileKeys: [keyof MapTheme['tiles'], string][] = [
+      ['playerLight', 'tilePlayerLight'],
+      ['playerDark', 'tilePlayerDark'],
+      ['enemyLight', 'tileEnemyLight'],
+      ['enemyDark', 'tileEnemyDark'],
+    ];
+    for (const [themeKey, materialKey] of tileKeys) {
+      const mat = this.materials.get(materialKey);
+      if (mat) mat.diffuseColor = Color3.FromHexString(theme.tiles[themeKey]);
+    }
+    if (this.shoreFoamMat) {
+      this.shoreFoamMat.diffuseColor = Color3.Black();
+      const foam = Color3.FromHexString(theme.mats.shoreFoam[1]);
+      this.shoreFoamMat.emissiveColor = foam;
+    }
+  }
+
+  setMap(mapId: MapId): void {
+    if (mapId === this.mapId) return;
+    this.mapId = mapId;
+    this.rebuildWorld();
+  }
+
+  getMap(): MapId {
+    return this.mapId;
+  }
+
+  private rebuildWorld(): void {
+    this.setDragging(false);
+    this.clearUnits();
+    this.hideDragPath();
+    this.draggedUid = null;
+    this.dropJumps.clear();
+    this.hoverTile = null;
+    for (const light of [...this.scene.lights]) {
+      if (light !== this.hemi && light !== this.dir) light.dispose();
+    }
+    for (const mesh of [...this.scene.meshes]) mesh.dispose(false, false);
+    for (const material of this.materials.values()) material.dispose();
+    this.materials.clear();
+    this.tiles = [];
+    this.flames = [];
+    this.motes = [];
+    this.hoverMarker = null;
+    this.hoverMarkerMat = null;
+    this.dropMarker = null;
+    this.dropMarkerMat = null;
+    this.shoreFoamMat = null;
+    this.dragPathFx?.material.dispose();
+    this.dragPathFx = null;
+    this.buildEnvironment();
+    this.buildArena();
+    this.applyTheme();
   }
 
   private addBrazier(x: number, z: number, metal: StandardMaterial, ember: StandardMaterial, lit: boolean): void {
@@ -981,9 +1515,126 @@ export class ArenaScene {
 
   setDraggedUnit(uid: string | null): void {
     this.draggedUid = uid;
-    for (const [id, visual] of this.unitVisuals) {
-      visual.root.setEnabled(uid === null || id !== uid);
+  }
+
+  screenToGround(clientX: number, clientY: number): { x: number; z: number } | null {
+    const point = this.clientToScene(clientX, clientY);
+    const ray = this.scene.createPickingRay(point.x, point.y, Matrix.Identity(), this.camera);
+    const distance = ray.intersectsPlane(new Plane(0, 1, 0, 0));
+    if (distance === null) return null;
+    const hit = ray.origin.add(ray.direction.scale(distance));
+    return { x: hit.x, z: hit.z };
+  }
+
+  private ensureDragPath(): DragPathFx {
+    if (this.dragPathFx) return this.dragPathFx;
+    const material = new StandardMaterial('dragThreadMat', this.scene);
+    material.disableLighting = true;
+    material.diffuseColor = Color3.Black();
+    material.emissiveColor = Color3.FromHexString('#8dffd9');
+    material.alpha = 0.92;
+    material.backFaceCulling = false;
+
+    const dots: Mesh[] = [];
+    for (let i = 0; i < 22; i++) {
+      const dot = MeshBuilder.CreateSphere(`dragThreadDot-${i}`, { diameter: 0.075, segments: 6 }, this.scene);
+      dot.material = material;
+      dot.isPickable = false;
+      dot.renderingGroupId = 2;
+      dot.setEnabled(false);
+      dots.push(dot);
     }
+
+    const ring = MeshBuilder.CreateTorus('dragThreadRing', { diameter: 0.72, thickness: 0.045, tessellation: 48 }, this.scene);
+    ring.material = material;
+    ring.isPickable = false;
+    ring.renderingGroupId = 2;
+    ring.setEnabled(false);
+
+    const arrowRoot = new TransformNode('dragThreadArrow', this.scene);
+    const arrow = MeshBuilder.CreateCylinder(
+      'dragThreadArrowHead',
+      { diameterTop: 0, diameterBottom: 0.3, height: 0.5, tessellation: 10 },
+      this.scene,
+    );
+    arrow.parent = arrowRoot;
+    arrow.rotation.x = Math.PI / 2;
+    arrow.material = material;
+    arrow.isPickable = false;
+    arrow.renderingGroupId = 2;
+    arrowRoot.setEnabled(false);
+
+    this.dragPathFx = { material, dots, ring, arrowRoot, arrow, active: false };
+    return this.dragPathFx;
+  }
+
+  setDragPath(from: { x: number; z: number } | null, to: { x: number; y: number } | null, valid: boolean): void {
+    const fx = this.ensureDragPath();
+    if (!from || !to) {
+      fx.active = false;
+      fx.dots.forEach((dot) => dot.setEnabled(false));
+      fx.ring.setEnabled(false);
+      fx.arrowRoot.setEnabled(false);
+      return;
+    }
+    const start = new Vector3(from.x, 0.16, from.z);
+    const end = new Vector3(to.x - 3.5, 0.18, to.y - 3.5);
+    const flat = Vector3.Distance(start, end);
+    if (flat < 0.15) {
+      fx.active = false;
+      fx.dots.forEach((dot) => dot.setEnabled(false));
+      fx.ring.setEnabled(false);
+      fx.arrowRoot.setEnabled(false);
+      return;
+    }
+    const control = start.add(end).scale(0.5);
+    control.y += 0.55 + flat * 0.18;
+    const pointAt = (t: number): Vector3 => {
+      const inv = 1 - t;
+      return new Vector3(
+        inv * inv * start.x + 2 * inv * t * control.x + t * t * end.x,
+        inv * inv * start.y + 2 * inv * t * control.y + t * t * end.y,
+        inv * inv * start.z + 2 * inv * t * control.z + t * t * end.z,
+      );
+    };
+    const color = Color3.FromHexString(valid ? '#8dffd9' : '#ff7a6a');
+    fx.material.emissiveColor = color;
+    fx.active = true;
+
+    for (let i = 0; i < fx.dots.length; i++) {
+      const t = (i + 1) / (fx.dots.length + 1);
+      const dot = fx.dots[i];
+      dot.position.copyFrom(pointAt(t));
+      const size = 0.7 + Math.sin(t * Math.PI) * 0.85;
+      dot.scaling.setAll(size);
+      dot.setEnabled(true);
+    }
+    fx.ring.position.copyFrom(start);
+    fx.ring.setEnabled(true);
+
+    const headT = 0.955;
+    const headPos = pointAt(headT);
+    const ahead = pointAt(1);
+    fx.arrowRoot.position.copyFrom(headPos);
+    const direction = ahead.subtract(headPos);
+    if (direction.lengthSquared() > 0.0001) {
+      fx.arrowRoot.lookAt(ahead);
+    }
+    fx.arrowRoot.setEnabled(true);
+  }
+
+  hideDragPath(): void {
+    const fx = this.dragPathFx;
+    if (!fx) return;
+    fx.active = false;
+    fx.dots.forEach((dot) => dot.setEnabled(false));
+    fx.ring.setEnabled(false);
+    fx.arrowRoot.setEnabled(false);
+  }
+
+  queueDropJump(uid: string, from: { x: number; z: number } | null): void {
+    if (!from) return;
+    this.dropJumps.set(uid, new Vector3(from.x, 0, from.z));
   }
 
   setDropHighlight(cell: { x: number; y: number } | null, valid: boolean): void {
@@ -1047,12 +1698,26 @@ export class ArenaScene {
         this.unitVisuals.set(unit.uid, visual);
       }
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
-      visual.root.position = visual.target.clone();
-      visual.leap = null;
-      visual.leapKey = null;
+      const jumpFrom = this.dropJumps.get(unit.uid);
+      if (jumpFrom) {
+        visual.root.position.copyFrom(jumpFrom);
+        visual.leap = {
+          from: jumpFrom.clone(),
+          to: visual.target.clone(),
+          elapsed: 0,
+          duration: 0.46,
+          height: 0.85 + Math.min(1.1, Vector3.Distance(jumpFrom, visual.target) * 0.1),
+        };
+        visual.leapKey = null;
+        this.dropJumps.delete(unit.uid);
+      } else {
+        visual.root.position = visual.target.clone();
+        visual.leap = null;
+        visual.leapKey = null;
+      }
       visual.facingTarget = visual.team === 0 ? Math.PI : 0;
       visual.model.body.rotation.y = visual.facingTarget;
-      visual.root.setEnabled(unit.uid !== this.draggedUid);
+      visual.root.setEnabled(true);
       visual.hpTarget = 1;
       visual.hpDisplay = 1;
       visual.hpTrailRatio = 1;
@@ -2181,6 +2846,12 @@ export class ArenaScene {
 
   private animate(): void {
     this.animateEnvironment();
+    const pathFx = this.dragPathFx;
+    if (pathFx?.active) {
+      const pulse = 1 + Math.sin(this.time * 9) * 0.16;
+      pathFx.ring.scaling.setAll(pulse);
+      pathFx.material.alpha = 0.82 + Math.sin(this.time * 11) * 0.12;
+    }
     const dt = Math.min(0.06, this.engine.getDeltaTime() / 1000);
     for (const visual of this.unitVisuals.values()) {
       const leaping = visual.leap !== null;

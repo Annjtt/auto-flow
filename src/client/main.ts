@@ -5,6 +5,7 @@ import {
   DEFAULT_SETTINGS,
   PLAYER_ROWS,
   RACE_NAMES,
+  SHOP_ODDS,
   STAR_MULTIPLIER,
   type BattleSnapshot,
   type LobbySettings,
@@ -15,7 +16,7 @@ import {
   type UnitView,
 } from '../shared/types';
 import { Net } from './net';
-import { ArenaScene, type FloatTextKind } from './scene';
+import { ArenaScene, MAP_THEME_ACCENTS, type FloatTextKind, type MapId } from './scene';
 import { ShopPreview } from './shopPreview';
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -49,6 +50,61 @@ function formatNumber(value: number): string {
   return String(Math.round(value));
 }
 
+interface MapOption {
+  id: MapId;
+  name: string;
+  subtitle: string;
+  light: string;
+  dark: string;
+  glow: string;
+}
+
+const MAP_OPTIONS: MapOption[] = [
+  {
+    id: 'kara',
+    name: 'Upper Tower Kara',
+    subtitle: 'Ночная башня',
+    light: '#cfd3e8',
+    dark: '#211f30',
+    glow: '#b07cff',
+  },
+  {
+    id: 'starry',
+    name: 'Starry Court',
+    subtitle: 'Звёздный двор',
+    light: '#dfe9f2',
+    dark: '#5f7489',
+    glow: '#7fd7ff',
+  },
+  {
+    id: 'ruins',
+    name: 'Shatty Ruins',
+    subtitle: 'Руины Шатти',
+    light: '#d9c4a4',
+    dark: '#6b5039',
+    glow: '#e8ae63',
+  },
+  {
+    id: 'jaddy',
+    name: 'Jaddy Forest',
+    subtitle: 'Лес Джадди',
+    light: '#a7c994',
+    dark: '#33503a',
+    glow: '#7de09a',
+  },
+];
+
+const MAP_IDS = new Set<MapId>(MAP_OPTIONS.map((entry) => entry.id));
+
+function loadMap(): MapId {
+  const stored = localStorage.getItem('autoflow.map');
+  return stored && MAP_IDS.has(stored as MapId) ? (stored as MapId) : 'jaddy';
+}
+
+function mapOption(id: MapId): MapOption {
+  return MAP_OPTIONS.find((entry) => entry.id === id) ?? MAP_OPTIONS[3];
+}
+
 let room: RoomView | null = null;
 let battle: BattleSnapshot | null = null;
 let selectedUid: string | null = null;
@@ -65,6 +121,9 @@ let synergySig = '';
 let playersSig = '';
 let resultSig = '';
 let phaseSig = '';
+let oddsSig = '';
+let currentMap: MapId = loadMap();
+let shopOpen = false;
 
 const playerNameInput = byId<HTMLInputElement>('playerName');
 const codeInput = byId<HTMLInputElement>('codeInput');
@@ -95,36 +154,56 @@ const gameOver = byId('gameOver');
 const gameOverTitle = byId('gameOverTitle');
 const gameOverText = byId('gameOverText');
 const gameOverEmblem = byId('gameOverEmblem');
+const mapGrid = byId('mapGrid');
+const shopToggleBtn = byId<HTMLButtonElement>('shopToggleBtn');
+const shopCloseBtn = byId<HTMLButtonElement>('shopCloseBtn');
+const shopOdds = byId('shopOdds');
+const shopLevel = byId('shopLevel');
+const shopGold = byId('shopGold');
+const hudUnitCount = byId('hudUnitCount');
+const hudLevelCap = byId('hudLevelCap');
+const hudOpponent = byId('hudOpponent');
+const hudXpText = byId('hudXpText');
+const hudPhaseCard = byId('hudPhaseCard');
+const hudFocusRing = document.getElementById('hudFocusRing') as unknown as SVGCircleElement;
+const shopToggleLabel = shopToggleBtn.querySelector('b');
+const lobbyBoardPreview = byId('lobbyBoardPreview');
+const lobbyBoardName = byId('lobbyBoardName');
 
 const storedName = localStorage.getItem('autoflow.name') ?? '';
 playerNameInput.value = storedName;
+document.body.dataset.map = currentMap;
 
 const net = new Net();
-const scene = new ArenaScene(canvas, {
-  onCellClick: (x, y) => {
-    if (!room || room.phase !== 'prep' || !room.self?.alive) return;
-    if (!selectedUid) return;
-    net.send({ type: 'move_unit', uid: selectedUid, to: { type: 'board', x, y } });
-    selectedUid = null;
-    refreshSelection();
-  },
-  onUnitClick: (uid) => {
-    if (!room || room.phase !== 'prep' || !room.self?.alive) return;
-    const self = room.self;
-    if (selectedUid && selectedUid !== uid) {
-      const target = self.board.find((unit) => unit.uid === uid);
-      if (target) {
-        net.send({ type: 'move_unit', uid: selectedUid, to: { type: 'board', x: target.x, y: target.y } });
-        selectedUid = null;
-        refreshSelection();
-        return;
+const scene = new ArenaScene(
+  canvas,
+  {
+    onCellClick: (x, y) => {
+      if (!room || room.phase !== 'prep' || !room.self?.alive) return;
+      if (!selectedUid) return;
+      net.send({ type: 'move_unit', uid: selectedUid, to: { type: 'board', x, y } });
+      selectedUid = null;
+      refreshSelection();
+    },
+    onUnitClick: (uid) => {
+      if (!room || room.phase !== 'prep' || !room.self?.alive) return;
+      const self = room.self;
+      if (selectedUid && selectedUid !== uid) {
+        const target = self.board.find((unit) => unit.uid === uid);
+        if (target) {
+          net.send({ type: 'move_unit', uid: selectedUid, to: { type: 'board', x: target.x, y: target.y } });
+          selectedUid = null;
+          refreshSelection();
+          return;
+        }
       }
-    }
-    selectedUid = selectedUid === uid ? null : uid;
-    refreshSelection();
+      selectedUid = selectedUid === uid ? null : uid;
+      refreshSelection();
+    },
+    onFloatText: spawnFloatText,
   },
-  onFloatText: spawnFloatText,
-});
+  currentMap,
+);
 const shopPreview = new ShopPreview(byId<HTMLCanvasElement>('shopPreview'));
 
 function spawnFloatText(text: string, x: number, y: number, kind: FloatTextKind): void {
@@ -136,6 +215,50 @@ function spawnFloatText(text: string, x: number, y: number, kind: FloatTextKind)
   el.style.top = `${Math.round(y)}px`;
   floatLayer.appendChild(el);
   window.setTimeout(() => el.remove(), 1000);
+}
+
+function renderMapGrid(): void {
+  mapGrid.innerHTML = MAP_OPTIONS.map((option) => {
+    const selected = option.id === currentMap;
+    return `
+      <button class="map-card ${selected ? 'selected' : ''}" type="button"
+        data-map-choice="${option.id}"
+        style="--map-light:${option.light};--map-dark:${option.dark};--map-glow:${option.glow}"
+        aria-pressed="${selected}">
+        <span class="map-art" aria-hidden="true">
+          <span class="map-art-grid"></span>
+          <span class="map-art-shade"></span>
+        </span>
+        <span class="map-copy"><b>${option.name}</b><small>${option.subtitle}</small></span>
+        <span class="map-check" aria-hidden="true">✓</span>
+      </button>`;
+  }).join('');
+}
+
+function syncMapLabels(): void {
+  const option = mapOption(currentMap);
+  document.body.dataset.map = currentMap;
+  document.body.style.setProperty('--map-accent', MAP_THEME_ACCENTS[currentMap]);
+  lobbyBoardPreview.dataset.map = currentMap;
+  lobbyBoardName.textContent = option.name;
+}
+
+function selectMap(id: MapId): void {
+  if (id === currentMap) return;
+  currentMap = id;
+  localStorage.setItem('autoflow.map', currentMap);
+  scene.setMap(currentMap);
+  syncMapLabels();
+  renderMapGrid();
+  toast(`Доска: ${mapOption(currentMap).name}`, 'success');
+}
+
+function setShopOpen(open: boolean): void {
+  const canPrepare = Boolean(room?.self?.alive && room.phase === 'prep');
+  shopOpen = open && canPrepare;
+  shopBar.classList.toggle('hidden', !shopOpen);
+  shopToggleBtn.classList.toggle('active', shopOpen);
+  shopToggleBtn.setAttribute('aria-pressed', String(shopOpen));
 }
 
 function showScreen(name: 'menu' | 'lobby' | 'game'): void {
@@ -257,7 +380,12 @@ function handleRoom(nextRoom: RoomView): void {
   if (nextRoom.phase === 'prep' && previous?.phase !== 'prep') {
     battle = null;
     battleResult.classList.add('hidden');
+    shopOpen = Boolean(nextRoom.self?.alive);
   }
+  if (nextRoom.phase === 'combat' || nextRoom.phase === 'result' || nextRoom.phase === 'finished') {
+    shopOpen = false;
+  }
+  document.body.dataset.phase = nextRoom.phase;
 
   showScreen('game');
   renderGame();
@@ -289,9 +417,12 @@ function resetToMenu(): void {
   selectedUid = null;
   gameOverShown = false;
   surrenderPending = false;
+  shopOpen = false;
+  setShopOpen(false);
   scene.clearUnits();
   shopPreview.setUnits([]);
   shopSig = '';
+  delete document.body.dataset.phase;
   gameOver.classList.add('hidden');
   byId('spectatorBanner').classList.add('hidden');
   showScreen('menu');
@@ -350,10 +481,16 @@ interface DragState {
   cellValid: boolean;
   overBench: boolean;
   benchValid: boolean;
+  fromWorld: { x: number; z: number } | null;
 }
 
 let drag: DragState | null = null;
 let suppressBenchClick = false;
+
+function dragOrigin(unit: { x: number; y: number } | null): { x: number; z: number } | null {
+  if (!unit) return null;
+  return { x: unit.x - 3.5, z: unit.y - 3.5 };
+}
 
 function beginDrag(uid: string, source: DragSource, event: PointerEvent): void {
   const self = room?.self;
@@ -363,6 +500,14 @@ function beginDrag(uid: string, source: DragSource, event: PointerEvent): void {
       ? self.bench.find((item) => item.uid === uid)
       : self.board.find((item) => item.uid === uid);
   if (!unit) return;
+  let fromWorld = source === 'board' ? dragOrigin(unit as UnitView) : null;
+  if (source === 'bench') {
+    const card = benchCards.querySelector<HTMLElement>(`[data-bench-uid="${uid}"]`);
+    if (card) {
+      const rect = card.getBoundingClientRect();
+      fromWorld = scene.screenToGround(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+  }
   drag = {
     uid,
     defId: unit.defId,
@@ -377,6 +522,7 @@ function beginDrag(uid: string, source: DragSource, event: PointerEvent): void {
     cellValid: false,
     overBench: false,
     benchValid: false,
+    fromWorld,
   };
   if (source === 'board') scene.setDragging(true);
 }
@@ -398,15 +544,16 @@ function activateDrag(): void {
   drag.active = true;
   suppressBenchClick = true;
   hideTooltip();
+  if (shopOpen) setShopOpen(false);
   scene.setDragging(true);
   scene.setDraggedUnit(drag.uid);
-  drag.ghost = createDragGhost(drag.defId, drag.star);
-  document.body.appendChild(drag.ghost);
-  document.body.classList.add('dragging-unit');
   if (drag.source === 'bench') {
+    drag.ghost = createDragGhost(drag.defId, drag.star);
+    document.body.appendChild(drag.ghost);
     const card = benchCards.querySelector<HTMLElement>(`[data-bench-uid="${drag.uid}"]`);
     card?.classList.add('dragging');
   }
+  document.body.classList.add('dragging-unit');
 }
 
 function updateGhostPosition(x: number, y: number): void {
@@ -445,6 +592,7 @@ function updateDropTarget(x: number, y: number): void {
     drag.cellValid = false;
     benchBar.classList.add(drag.benchValid ? 'drop-valid' : 'drop-invalid');
     scene.setDropHighlight(null, false);
+    scene.setDragPath(null, null, false);
     return;
   }
 
@@ -452,6 +600,7 @@ function updateDropTarget(x: number, y: number): void {
   drag.cell = cell;
   drag.cellValid = cell ? canDropOnCell(cell) : false;
   scene.setDropHighlight(cell, drag.cellValid);
+  scene.setDragPath(drag.fromWorld, cell, drag.cellValid);
 }
 
 function cleanupDrag(): { state: DragState; wasActive: boolean } | null {
@@ -466,6 +615,7 @@ function cleanupDrag(): { state: DragState; wasActive: boolean } | null {
   scene.setDragging(false);
   scene.setDraggedUnit(null);
   scene.setDropHighlight(null, false);
+  scene.hideDragPath();
   window.setTimeout(() => {
     suppressBenchClick = false;
   }, 0);
@@ -479,6 +629,7 @@ function finishDrag(event: PointerEvent): void {
   const overBench = drag.overBench;
   const benchValid = drag.benchValid;
   const uid = drag.uid;
+  const fromWorld = drag.fromWorld;
   const result = cleanupDrag();
   if (!result?.wasActive) return;
 
@@ -487,6 +638,7 @@ function finishDrag(event: PointerEvent): void {
     selectedUid = null;
     refreshSelection();
   } else if (cell && cellValid) {
+    scene.queueDropJump(uid, fromWorld);
     net.send({ type: 'move_unit', uid, to: { type: 'board', x: cell.x, y: cell.y } });
     selectedUid = null;
     refreshSelection();
@@ -508,19 +660,27 @@ function renderGame(): void {
   byId('hudLevel').textContent = String(self.level);
   const xpNeeded = Math.max(1, self.xpNeeded);
   byId('hudXpFill').style.width = `${Math.min(100, (self.xp / xpNeeded) * 100)}%`;
+  hudXpText.textContent = `${self.xp} / ${xpNeeded}`;
   byId('hudRound').textContent = String(room.round);
   byId('hudMaxRounds').textContent = String(room.maxRounds);
+  hudUnitCount.textContent = String(self.board.length);
+  hudLevelCap.textContent = String(self.level);
+  const focusPercent = Math.max(0, Math.min(1, self.board.length / Math.max(1, self.level)));
+  hudFocusRing.style.strokeDasharray = `${(focusPercent * 276.46).toFixed(1)} 276.46`;
+  shopGold.textContent = String(self.gold);
+  shopLevel.textContent = `Ур. ${self.level}`;
   updateClock();
   renderPlayers();
   renderSynergies();
   renderShop();
+  renderShopOdds();
   renderBench();
   renderSelectedPanel();
   renderBattleResult();
   renderPhaseBanner();
 
   const canPrepare = self.alive && room.phase === 'prep';
-  shopBar.classList.toggle('hidden', !canPrepare);
+  setShopOpen(canPrepare && shopOpen);
   benchBar.classList.toggle('hidden', !canPrepare);
   spectatorBanner.classList.toggle(
     'hidden',
@@ -533,13 +693,56 @@ function renderGame(): void {
   xpBtn.disabled = !canPrepare || self.level >= 9 || self.gold < 4;
   rerollBtn.disabled = !canPrepare || self.gold < 2;
   lockBtn.disabled = !canPrepare;
+  shopToggleBtn.disabled = !canPrepare;
   lockBtn.classList.toggle('active', self.locked);
-  byId('lockState').textContent = self.locked ? 'закреплён' : '';
-  byId('benchCount').textContent = `${self.bench.length} / 9`;
+  byId('lockState').textContent = self.locked ? 'закреплён' : 'замок';
+  byId('benchCount').textContent = `${self.bench.length} / ${BENCH_SIZE}`;
+  hudOpponent.textContent = opponentLine();
+  hudOpponent.classList.toggle('battle', room.phase === 'combat');
   const canSurrender = self.alive && room.phase !== 'finished';
   surrenderBtn.disabled = !canSurrender || surrenderPending;
   surrenderBtn.classList.toggle('hidden', !canSurrender);
+  syncMapLabels();
 }
+
+function opponentLine(): string {
+  if (!room) return '';
+  if (room.phase === 'combat') {
+    return `Бой против ${room.opponentName ?? 'неизвестного соперника'}`;
+  }
+  if (room.phase === 'result') {
+    const word =
+      room.self?.lastResult === 'win'
+        ? 'победа'
+        : room.self?.lastResult === 'loss'
+          ? 'поражение'
+          : room.self?.lastResult === 'draw'
+            ? 'ничья'
+            : 'итоги';
+    return `${word} · раунд ${room.round}`;
+  }
+  if (room.phase === 'prep') {
+    return room.opponentName ? `Следующий соперник · ${room.opponentName}` : 'Соперник определится в бою';
+  }
+  if (room.phase === 'finished') return 'Матч завершён';
+  return 'Ожидание соперников';
+}
+
+function renderShopOdds(): void {
+  if (!room?.self) return;
+  const self = room.self;
+  const sig = `${self.level}|${self.gold}`;
+  if (sig === oddsSig) return;
+  oddsSig = sig;
+  const odds = SHOP_ODDS[self.level] ?? SHOP_ODDS[1];
+  shopOdds.innerHTML = odds
+    .map(
+      (chance, index) =>
+        `<span class="odd cost-${index + 1}" title="Шанс бойца за ${index + 1} золота"><i></i><b>${chance}%</b></span>`,
+    )
+    .join('');
+}
+
 
 function updateClock(): void {
   if (!room) return;
@@ -547,6 +750,7 @@ function updateClock(): void {
   const label = byId('hudPhaseLabel');
   const elapsed = (Date.now() - lastRoomAt) / 1000;
   const remaining = Math.max(0, room.timeLeft - elapsed);
+  hudPhaseCard.dataset.phase = room.phase;
   if (room.phase === 'finished') {
     timer.textContent = '—';
     label.textContent = 'завершён';
@@ -570,54 +774,67 @@ function renderPlayers(): void {
     if (a.streak !== b.streak) return b.streak - a.streak;
     return (a.placement ?? 99) - (b.placement ?? 99);
   });
-  playersPanel.innerHTML = players
+  const aliveCount = players.filter((player) => player.alive).length;
+  const rows = players
     .map((player, index) => {
-      const classes = ['player-chip'];
+      const classes = ['leader-row'];
       if (player.id === room?.selfId) classes.push('self');
       if (!player.alive) classes.push('dead');
       const nextOpponent = player.id === room?.opponentId && player.id !== room?.selfId && player.alive;
       if (nextOpponent) classes.push('next-opponent');
       const hpPercent = Math.max(0, Math.min(100, (player.lives / maxLives) * 100));
       if (hpPercent <= 25) classes.push('hp-low');
-      if (player.streak >= 2) {
-        classes.push('has-streak');
-        classes.push(
-          player.streak >= 8
-            ? 'streak-inferno'
-            : player.streak >= 5
-              ? 'streak-blaze'
-              : player.streak >= 3
-                ? 'streak-hot'
-                : 'streak-warm',
-        );
-      }
-      const streakLevel = Math.min(8, Math.max(0, player.streak));
+      const rank = player.alive ? index + 1 : (player.placement ?? index + 1);
       const streak =
         player.streak > 0
-          ? `<span class="chip-streak" title="Победная серия: ${player.streak}"><b>${player.streak}</b></span>`
+          ? `<span class="leader-streak hot" title="Победная серия: ${player.streak}">▲ ${player.streak}</span>`
           : player.streak < 0
-            ? `<span class="chip-streak loss" title="Серия поражений: ${Math.abs(player.streak)}"><b>−${Math.abs(player.streak)}</b></span>`
+            ? `<span class="leader-streak cold" title="Серия поражений: ${Math.abs(player.streak)}">▼ ${Math.abs(player.streak)}</span>`
             : '';
+      const initial = escapeHtml(player.name.slice(0, 1).toUpperCase() || '?');
       return `
-        <div class="${classes.join(' ')}" data-player-id="${escapeHtml(player.id)}" style="--streak:${streakLevel}">
-          ${player.streak >= 2 ? `<span class="streak-flare" aria-hidden="true">${'<i></i>'.repeat(3)}${'<b></b>'.repeat(12)}${'<s></s>'.repeat(4)}</span>` : ''}
-          <div class="chip-head">
-            <span class="chip-rank">${player.placement ?? index + 1}</span>
-            <span class="chip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</span>
-            <span class="chip-lives">${player.lives}<small>/${maxLives}</small></span>
-          </div>
-          <div class="chip-hp" role="progressbar" aria-valuemin="0" aria-valuemax="${maxLives}" aria-valuenow="${player.lives}" aria-label="Здоровье">
-            <span class="chip-hp-fill" style="width:${hpPercent.toFixed(1)}%"></span>
-          </div>
-          <div class="chip-foot">
-            ${streak}
-            ${nextOpponent ? '<span class="chip-opponent" title="Следующий соперник">соперник</span>' : ''}
-            <span class="chip-meta">ур. ${player.level}</span>
+        <div class="${classes.join(' ')}" data-player-id="${escapeHtml(player.id)}" data-streak="${Math.min(8, Math.max(0, player.streak))}">
+          <span class="leader-rank ${rank === 1 ? 'first' : ''}">${rank}</span>
+          <span class="leader-avatar">${initial}</span>
+          <div class="leader-main">
+            <div class="leader-line">
+              <b class="leader-name">${escapeHtml(player.name)}</b>
+              ${player.isBot ? '<span class="bot-tag">ИИ</span>' : ''}
+              ${nextOpponent ? '<span class="opp-tag">соперник</span>' : ''}
+              <span class="leader-lives">${player.lives}</span>
+            </div>
+            <div class="leader-hp" role="progressbar" aria-valuemin="0" aria-valuemax="${maxLives}" aria-valuenow="${player.lives}" aria-label="Здоровье">
+              <i style="width:${hpPercent.toFixed(1)}%"></i>
+            </div>
+            <div class="leader-meta">
+              <span>ур. ${player.level}</span>
+              ${streak}
+              ${player.alive ? '' : '<span class="dead-tag">выбыл</span>'}
+            </div>
           </div>
         </div>`;
     })
     .join('');
+  playersPanel.innerHTML = `
+    <div class="panel-head">
+      <span>Таблица лидеров</span>
+      <b>${aliveCount} / ${players.length}</b>
+    </div>
+    <div class="leader-list">${rows}</div>`;
 }
+
+const SYNERGY_GLYPHS: Record<string, string> = {
+  human: '♜',
+  undead: '☠',
+  mech: '⚙',
+  beast: '✧',
+  demon: '◆',
+  elf: '❧',
+  warrior: '⚔',
+  mage: '✦',
+  hunter: '➶',
+  assassin: '✹',
+};
 
 function renderSynergies(): void {
   if (!room?.self) return;
@@ -625,27 +842,37 @@ function renderSynergies(): void {
   const sig = JSON.stringify(list);
   if (sig === synergySig) return;
   synergySig = sig;
+  const activeCount = list.filter((synergy) => synergy.active).length;
   if (list.length === 0) {
-    synergyPanel.innerHTML = '<div class="synergy-title">Синергии</div><div class="synergy-item"><div class="synergy-head"><b>Пока пусто</b></div><div class="synergy-desc">Выставьте бойцов на поле, чтобы открыть бонусы рас и классов.</div></div>';
+    synergyPanel.innerHTML = `
+      <div class="panel-head"><span>Синергии</span><b>0</b></div>
+      <div class="synergy-empty">
+        <span class="syn-icon muted" aria-hidden="true">✧</span>
+        <div><b>Пока пусто</b><p>Выставьте бойцов на поле, чтобы открыть бонусы рас и классов.</p></div>
+      </div>`;
     return;
   }
   synergyPanel.innerHTML = `
-    <div class="synergy-title">Синергии</div>
-    ${list
-      .map((synergy) => {
-        const thresholdText = synergy.active
-          ? `${synergy.count} / ${synergy.threshold}`
-          : synergy.next
-            ? `${synergy.count} / ${synergy.next}`
-            : `${synergy.count}`;
-        const effect = synergy.effects[Math.max(0, synergy.tier - 1)] ?? '';
-        return `
-          <div class="synergy-item ${synergy.active ? 'active' : ''}">
-            <div class="synergy-head"><b>${escapeHtml(synergy.name)}</b><span>${thresholdText}</span></div>
-            <div class="synergy-desc">${escapeHtml(effect)}</div>
-          </div>`;
-      })
-      .join('')}`;
+    <div class="panel-head"><span>Синергии</span><b>${activeCount} / ${list.length}</b></div>
+    <div class="synergy-list">
+      ${list
+        .map((synergy) => {
+          const target = synergy.next ?? synergy.threshold ?? Math.max(1, synergy.count);
+          const percent = Math.max(0, Math.min(100, (synergy.count / Math.max(1, target)) * 100));
+          const effect = synergy.effects[Math.max(0, synergy.tier - 1)] ?? synergy.effects[0] ?? '';
+          const glyph = SYNERGY_GLYPHS[synergy.key] ?? '✧';
+          return `
+            <div class="synergy-item ${synergy.active ? 'active' : ''} ${synergy.group} race-${synergy.key}">
+              <span class="syn-icon" aria-hidden="true">${glyph}</span>
+              <div class="syn-body">
+                <div class="syn-line"><b>${escapeHtml(synergy.name)}</b><span>${synergy.count} / ${target}</span></div>
+                <div class="syn-bar"><i style="width:${percent.toFixed(1)}%"></i></div>
+                <div class="syn-desc">${escapeHtml(effect)}</div>
+              </div>
+            </div>`;
+        })
+        .join('')}
+    </div>`;
 }
 
 function unitCardMarkup(
@@ -835,6 +1062,7 @@ function renderPhaseBanner(): void {
 
 function renderLobby(): void {
   if (!room) return;
+  syncMapLabels();
   byId('roomName').textContent = room.name;
   byId('roomCode').textContent = room.code;
   byId('lobbyCount').textContent = `${room.players.length} / ${room.settings.maxPlayers}`;
@@ -1287,6 +1515,20 @@ codeInput.addEventListener('input', () => {
 
 byId('refreshLobbies').addEventListener('click', () => net.send({ type: 'list_lobbies' }));
 
+mapGrid.addEventListener('click', (event) => {
+  const target = (event.target as HTMLElement).closest('[data-map-choice]') as HTMLElement | null;
+  const id = target?.dataset.mapChoice;
+  if (!id || !MAP_IDS.has(id as MapId)) return;
+  selectMap(id as MapId);
+});
+
+shopToggleBtn.addEventListener('click', () => {
+  if (!room?.self?.alive || room.phase !== 'prep') return;
+  setShopOpen(!shopOpen);
+});
+
+shopCloseBtn.addEventListener('click', () => setShopOpen(false));
+
 lobbyList.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest('[data-join]') as HTMLElement | null;
   if (!target) return;
@@ -1404,9 +1646,19 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (drag) cancelDrag();
     else if (modalRoot.innerHTML) closeModal();
+    else if (shopOpen) setShopOpen(false);
     else if (selectedUid) {
       selectedUid = null;
       refreshSelection();
+    }
+    return;
+  }
+  const target = event.target as HTMLElement | null;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
+  if ((event.key === 'b' || event.key === 'B') && currentScreen === 'game') {
+    if (room?.self?.alive && room.phase === 'prep') {
+      event.preventDefault();
+      setShopOpen(!shopOpen);
     }
   }
 });
@@ -1416,5 +1668,7 @@ window.setInterval(updateClock, 200);
 if (storedName) {
   playerNameInput.value = storedName;
 }
+renderMapGrid();
+syncMapLabels();
 const initialName = currentName();
 net.connect(initialName);
