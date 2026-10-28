@@ -5,6 +5,7 @@ import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Plane } from '@babylonjs/core/Maths/math.plane';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -100,17 +101,45 @@ const METER_WIDTH = 0.62;
 const METER_Y_GAP = 0.078;
 const STAR_Y_GAP = 0.16;
 
+// Meter planes are drawn from a single texture each: frame, track, trail and
+// fill live in the texture instead of being stacked as coplanar meshes.
+const BAR_FRAME_WIDTH = 0.7;
+const BAR_TRACK_WIDTH = 0.66;
+const BAR_FRAME_HEIGHT = 0.1;
+const MANA_FRAME_HEIGHT = 0.06;
+const HP_TRACK_HEIGHT = 0.068;
+const HP_FILL_HEIGHT = 0.05;
+const MANA_TRACK_HEIGHT = 0.04;
+const MANA_FILL_HEIGHT = 0.03;
+const METER_TEX_WIDTH = 256;
+const HP_TEX_HEIGHT = 32;
+const MANA_TEX_HEIGHT = 24;
+
 const GROUND_Y = -1.15;
+
+interface UnitLeap {
+  from: Vector3;
+  to: Vector3;
+  elapsed: number;
+  duration: number;
+  height: number;
+}
 
 interface UnitVisual {
   root: TransformNode;
-  hpFill: Mesh;
-  hpTrail: Mesh;
-  manaFill: Mesh;
+  hpBar: Mesh;
+  manaBar: Mesh;
+  hpTexture: DynamicTexture;
+  manaTexture: DynamicTexture;
+  hpDrawn: { fill: number; trail: number };
+  manaDrawn: number;
   selection: Mesh;
   defId: string;
   star: number;
   target: Vector3;
+  facingTarget: number;
+  leap: UnitLeap | null;
+  leapKey: string | null;
   selected: boolean;
   team: number;
   model: UnitModel;
@@ -181,6 +210,7 @@ export class ArenaScene {
   private draggedUid: string | null = null;
   private time = 0;
   private materials = new Map<string, StandardMaterial>();
+  private glowLayer: GlowLayer | null = null;
   private flames: { mesh: Mesh; light: PointLight | null; phase: number }[] = [];
   private motes: { mesh: Mesh; baseX: number; baseZ: number; phase: number; speed: number }[] = [];
 
@@ -217,6 +247,7 @@ export class ArenaScene {
 
     const glow = new GlowLayer('glow', this.scene);
     glow.intensity = 0.38;
+    this.glowLayer = glow;
 
     this.buildEnvironment();
     this.buildArena();
@@ -1017,6 +1048,10 @@ export class ArenaScene {
       }
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
       visual.root.position = visual.target.clone();
+      visual.leap = null;
+      visual.leapKey = null;
+      visual.facingTarget = visual.team === 0 ? Math.PI : 0;
+      visual.model.body.rotation.y = visual.facingTarget;
       visual.root.setEnabled(unit.uid !== this.draggedUid);
       visual.hpTarget = 1;
       visual.hpDisplay = 1;
@@ -1059,6 +1094,26 @@ export class ArenaScene {
         fresh = true;
       }
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
+      visual.facingTarget = unit.facing;
+      if (unit.jump) {
+        const to = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
+        const key = `${unit.jump.fromX},${unit.jump.fromY}->${unit.x},${unit.y}`;
+        if (visual.leap) {
+          visual.leap.to.copyFrom(to);
+        } else if (visual.leapKey !== key) {
+          const from = new Vector3(unit.jump.fromX - 3.5, 0, unit.jump.fromY - 3.5);
+          const distance = Math.hypot(to.x - from.x, to.z - from.z);
+          visual.leap = {
+            from,
+            to,
+            elapsed: 0,
+            duration: Math.max(0.18, unit.jump.remaining),
+            height: 1.05 + Math.min(1.1, distance * 0.12),
+          };
+          visual.leapKey = key;
+          visual.root.position.copyFrom(from);
+        }
+      }
       visual.selection.setEnabled(false);
       visual.root.setEnabled(unit.alive);
       visual.hpTarget = Math.max(0, Math.min(1, unit.hp / unit.maxHp));
@@ -1167,56 +1222,55 @@ export class ArenaScene {
     selection.isPickable = false;
     selection.setEnabled(false);
 
-    const barY = Math.max(1.2, model.height);
-    const hpFrameMat = this.material('hpFrame', '#04060b');
-    const hpTrackMat = this.material(team === 0 ? 'hpTrackA' : 'hpTrackB', team === 0 ? '#13351f' : '#341216');
-    const hpTrailMat = this.material('hpTrail', '#e8a35c', '#7a3a10');
-    const manaFrameMat = this.material('manaFrame', '#030711');
-    const manaTrackMat = this.material('manaTrack', '#071629');
+    const barY = Math.max(1.2, model.height) + 0.12;
 
-    const hpFrame = MeshBuilder.CreatePlane(`hpFrame-${unit.uid}`, { width: 0.7, height: 0.1 }, this.scene);
-    hpFrame.parent = root;
-    hpFrame.position = new Vector3(0, barY, 0);
-    hpFrame.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    hpFrame.material = hpFrameMat;
-    hpFrame.isPickable = false;
-    const hpBg = MeshBuilder.CreatePlane(`hpBg-${unit.uid}`, { width: 0.66, height: 0.068 }, this.scene);
-    hpBg.parent = root;
-    hpBg.position = new Vector3(0, barY, 0.001);
-    hpBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    hpBg.material = hpTrackMat;
-    hpBg.isPickable = false;
-    const hpTrail = MeshBuilder.CreatePlane(`hpTrail-${unit.uid}`, { width: METER_WIDTH, height: 0.05 }, this.scene);
-    hpTrail.parent = root;
-    hpTrail.position = new Vector3(0, barY, 0.002);
-    hpTrail.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    hpTrail.material = hpTrailMat;
-    hpTrail.isPickable = false;
-    const hpFill = MeshBuilder.CreatePlane(`hp-${unit.uid}`, { width: METER_WIDTH, height: 0.05 }, this.scene);
-    hpFill.parent = root;
-    hpFill.position = new Vector3(0, barY, 0.003);
-    hpFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    hpFill.material = this.material(team === 0 ? 'hpA' : 'hpB', team === 0 ? '#5fc06f' : '#d45555', team === 0 ? '#1d5a29' : '#651b1b');
-    hpFill.isPickable = false;
+    // Each meter is one billboard plane whose texture already contains the
+    // frame, the empty track, the damage trail and the fill. Stacking those as
+    // separate coplanar planes made the draw order depend on the camera side,
+    // so the dark frame could cover the fill and the bar looked solid black.
+    const hpTexture = new DynamicTexture(
+      `hpTex-${unit.uid}`,
+      { width: METER_TEX_WIDTH, height: HP_TEX_HEIGHT },
+      this.scene,
+      false,
+    );
+    hpTexture.hasAlpha = false;
+    const hpBar = MeshBuilder.CreatePlane(`hp-${unit.uid}`, { width: BAR_FRAME_WIDTH, height: BAR_FRAME_HEIGHT }, this.scene);
+    hpBar.parent = root;
+    hpBar.position = new Vector3(0, barY, 0);
+    hpBar.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    hpBar.material = this.barMaterial(`hpMat-${unit.uid}`, hpTexture);
+    hpBar.isPickable = false;
+    hpBar.renderingGroupId = 1;
 
-    const manaFrame = MeshBuilder.CreatePlane(`manaFrame-${unit.uid}`, { width: 0.7, height: 0.06 }, this.scene);
-    manaFrame.parent = root;
-    manaFrame.position = new Vector3(0, barY - METER_Y_GAP, 0);
-    manaFrame.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    manaFrame.material = manaFrameMat;
-    manaFrame.isPickable = false;
-    const manaBg = MeshBuilder.CreatePlane(`manaBg-${unit.uid}`, { width: 0.66, height: 0.04 }, this.scene);
-    manaBg.parent = root;
-    manaBg.position = new Vector3(0, barY - METER_Y_GAP, 0.001);
-    manaBg.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    manaBg.material = manaTrackMat;
-    manaBg.isPickable = false;
-    const manaFill = MeshBuilder.CreatePlane(`mana-${unit.uid}`, { width: METER_WIDTH, height: 0.03 }, this.scene);
-    manaFill.parent = root;
-    manaFill.position = new Vector3(0, barY - METER_Y_GAP, 0.002);
-    manaFill.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    manaFill.material = this.material('mana', '#4d9fff', '#1d4f9c');
-    manaFill.isPickable = false;
+    const manaTexture = new DynamicTexture(
+      `manaTex-${unit.uid}`,
+      { width: METER_TEX_WIDTH, height: MANA_TEX_HEIGHT },
+      this.scene,
+      false,
+    );
+    manaTexture.hasAlpha = false;
+    const manaBar = MeshBuilder.CreatePlane(
+      `mana-${unit.uid}`,
+      { width: BAR_FRAME_WIDTH, height: MANA_FRAME_HEIGHT },
+      this.scene,
+    );
+    manaBar.parent = root;
+    manaBar.position = new Vector3(0, barY - METER_Y_GAP, 0);
+    manaBar.billboardMode = Mesh.BILLBOARDMODE_ALL;
+    manaBar.material = this.barMaterial(`manaMat-${unit.uid}`, manaTexture);
+    manaBar.isPickable = false;
+    manaBar.renderingGroupId = 1;
+
+    root.onDisposeObservable.add(() => {
+      hpTexture.dispose();
+      manaTexture.dispose();
+      hpBar.material?.dispose();
+      manaBar.material?.dispose();
+    });
+    // Bars must keep their exact palette, so keep them out of the bloom pass.
+    this.glowLayer?.addExcludedMesh(hpBar);
+    this.glowLayer?.addExcludedMesh(manaBar);
 
     const gradeStars: Mesh[] = [];
     if (unit.star >= 2) {
@@ -1226,22 +1280,31 @@ export class ArenaScene {
       for (let i = 0; i < unit.star; i++) {
         const starMesh = this.createStarMesh(`gstar-${unit.uid}-${i}`, outer, outer * 0.42, gradeMat);
         starMesh.parent = root;
-        starMesh.position = new Vector3((i - (unit.star - 1) / 2) * spacing, barY + STAR_Y_GAP, 0.01);
+        starMesh.position = new Vector3((i - (unit.star - 1) / 2) * spacing, barY + STAR_Y_GAP, 0);
         starMesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
         starMesh.isPickable = false;
+        starMesh.renderingGroupId = 1;
         gradeStars.push(starMesh);
       }
     }
 
+    // Meters and stars live in rendering group 1, which clears the depth buffer
+    // before drawing, so bars never vanish behind models or props.
     return {
       root,
-      hpFill,
-      hpTrail,
-      manaFill,
+      hpBar,
+      manaBar,
+      hpTexture,
+      manaTexture,
+      hpDrawn: { fill: -1, trail: -1 },
+      manaDrawn: -1,
       selection,
       defId: unit.defId,
       star: unit.star,
       target: new Vector3(unit.x - 3.5, 0, unit.y - 3.5),
+      facingTarget: team === 0 ? Math.PI : 0,
+      leap: null,
+      leapKey: null,
       selected: false,
       team,
       model,
@@ -1292,16 +1355,90 @@ export class ArenaScene {
     return mesh;
   }
 
-  private applyMeters(visual: UnitVisual): void {
-    this.setMeterFill(visual.hpFill, visual.hpDisplay);
-    this.setMeterFill(visual.hpTrail, Math.max(visual.hpDisplay, visual.hpTrailRatio));
-    this.setMeterFill(visual.manaFill, visual.manaDisplay);
+  private barMaterial(name: string, texture: DynamicTexture): StandardMaterial {
+    const mat = new StandardMaterial(name, this.scene);
+    // The texture is the whole look of the bar. Emissive colour is added to the
+    // sampled texture, so it has to stay black for the palette to show up.
+    mat.disableLighting = true;
+    mat.diffuseColor = new Color3(0, 0, 0);
+    mat.emissiveTexture = texture;
+    mat.emissiveColor = new Color3(0, 0, 0);
+    mat.specularColor = new Color3(0, 0, 0);
+    mat.backFaceCulling = false;
+    return mat;
   }
 
-  private setMeterFill(mesh: Mesh, ratio: number): void {
-    const clamped = Math.max(0.001, Math.min(1, ratio));
-    mesh.scaling.x = clamped;
-    mesh.position.x = -(METER_WIDTH * (1 - clamped)) / 2;
+  private applyMeters(visual: UnitVisual): void {
+    const fill = Math.max(0, Math.min(1, visual.hpDisplay));
+    const trail = Math.max(fill, Math.min(1, visual.hpTrailRatio));
+    const mana = Math.max(0, Math.min(1, visual.manaDisplay));
+    // Repainting a 256px texture is cheap, but not free: only redraw when the
+    // rounded fill actually changes so idle units cost nothing.
+    if (Math.abs(visual.hpDrawn.fill - fill) > 0.004 || Math.abs(visual.hpDrawn.trail - trail) > 0.004) {
+      visual.hpDrawn.fill = fill;
+      visual.hpDrawn.trail = trail;
+      this.paintHpBar(visual, fill, trail);
+    }
+    if (Math.abs(visual.manaDrawn - mana) > 0.004) {
+      visual.manaDrawn = mana;
+      this.paintManaBar(visual, mana);
+    }
+  }
+
+  private paintHpBar(visual: UnitVisual, fill: number, trail: number): void {
+    const ctx = visual.hpTexture.getContext();
+    const w = METER_TEX_WIDTH;
+    const h = HP_TEX_HEIGHT;
+    const sx = w / BAR_FRAME_WIDTH;
+    const sy = h / BAR_FRAME_HEIGHT;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#050a12';
+    ctx.fillRect(0, 0, w, h);
+
+    const trackX = ((BAR_FRAME_WIDTH - BAR_TRACK_WIDTH) / 2) * sx;
+    const trackY = ((BAR_FRAME_HEIGHT - HP_TRACK_HEIGHT) / 2) * sy;
+    ctx.fillStyle = visual.team === 0 ? '#1d4a2b' : '#4a1f24';
+    ctx.fillRect(trackX, trackY, BAR_TRACK_WIDTH * sx, HP_TRACK_HEIGHT * sy);
+
+    const fillX = ((BAR_FRAME_WIDTH - METER_WIDTH) / 2) * sx;
+    const fillY = ((BAR_FRAME_HEIGHT - HP_FILL_HEIGHT) / 2) * sy;
+    const fillW = METER_WIDTH * sx;
+    const fillH = HP_FILL_HEIGHT * sy;
+    const trailW = Math.max(1, Math.round(fillW * trail));
+    ctx.fillStyle = '#e8a35c';
+    ctx.fillRect(fillX, fillY, trailW, fillH);
+    const hpW = Math.max(1, Math.round(fillW * fill));
+    ctx.fillStyle = visual.team === 0 ? '#5fc06f' : '#d45555';
+    ctx.fillRect(fillX, fillY, hpW, fillH);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.fillRect(fillX, fillY, hpW, Math.max(1, Math.round(fillH * 0.32)));
+    visual.hpTexture.update();
+  }
+
+  private paintManaBar(visual: UnitVisual, fill: number): void {
+    const ctx = visual.manaTexture.getContext();
+    const w = METER_TEX_WIDTH;
+    const h = MANA_TEX_HEIGHT;
+    const sx = w / BAR_FRAME_WIDTH;
+    const sy = h / MANA_FRAME_HEIGHT;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#030711';
+    ctx.fillRect(0, 0, w, h);
+    const trackX = ((BAR_FRAME_WIDTH - BAR_TRACK_WIDTH) / 2) * sx;
+    const trackY = ((MANA_FRAME_HEIGHT - MANA_TRACK_HEIGHT) / 2) * sy;
+    ctx.fillStyle = '#0e2642';
+    ctx.fillRect(trackX, trackY, BAR_TRACK_WIDTH * sx, MANA_TRACK_HEIGHT * sy);
+    const fillX = ((BAR_FRAME_WIDTH - METER_WIDTH) / 2) * sx;
+    const fillY = ((MANA_FRAME_HEIGHT - MANA_FILL_HEIGHT) / 2) * sy;
+    const fillW = METER_WIDTH * sx;
+    const fillH = MANA_FILL_HEIGHT * sy;
+    if (fill > 0.001) {
+      ctx.fillStyle = '#4d9fff';
+      ctx.fillRect(fillX, fillY, Math.max(1, Math.round(fillW * fill)), fillH);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillRect(fillX, fillY, Math.max(1, Math.round(fillW * fill)), Math.max(1, Math.round(fillH * 0.34)));
+    }
+    visual.manaTexture.update();
   }
 
   private spawnEffect(kind: string, x: number, y: number, team: number, id: string): void {
@@ -1330,6 +1467,10 @@ export class ArenaScene {
       color = '#b8c2d6';
       size = 0.2;
       ttl = 0.3;
+    } else if (kind === 'jump') {
+      color = '#c9a2ff';
+      size = 0.46;
+      ttl = 0.55;
     }
     mat.emissiveColor = Color3.FromHexString(color);
     mat.diffuseColor = Color3.FromHexString(color);
@@ -2042,20 +2183,42 @@ export class ArenaScene {
     this.animateEnvironment();
     const dt = Math.min(0.06, this.engine.getDeltaTime() / 1000);
     for (const visual of this.unitVisuals.values()) {
-      const dx = visual.target.x - visual.root.position.x;
-      const dz = visual.target.z - visual.root.position.z;
-      if (Math.abs(dx) > 0.002 || Math.abs(dz) > 0.002) {
-        visual.root.position.x += dx * 0.22;
-        visual.root.position.z += dz * 0.22;
+      const leaping = visual.leap !== null;
+      if (visual.leap) {
+        const leap = visual.leap;
+        leap.elapsed += dt;
+        const progress = Math.min(1, leap.elapsed / leap.duration);
+        const eased = progress * progress * (3 - 2 * progress);
+        visual.root.position.x = leap.from.x + (leap.to.x - leap.from.x) * eased;
+        visual.root.position.z = leap.from.z + (leap.to.z - leap.from.z) * eased;
+        visual.root.position.y = Math.sin(Math.PI * progress) * leap.height;
+        if (progress >= 1) {
+          visual.root.position.copyFrom(leap.to);
+          visual.leap = null;
+        }
+      } else {
+        const dx = visual.target.x - visual.root.position.x;
+        const dz = visual.target.z - visual.root.position.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance > 0.002) {
+          const travel = Math.min(distance, 4.2 * dt);
+          visual.root.position.x += (dx / distance) * travel;
+          visual.root.position.z += (dz / distance) * travel;
+        }
       }
+      const turn = Math.atan2(
+        Math.sin(visual.facingTarget - visual.model.body.rotation.y),
+        Math.cos(visual.facingTarget - visual.model.body.rotation.y),
+      );
+      visual.model.body.rotation.y += turn * Math.min(1, dt * 12);
       if (visual.selected) {
         visual.selection.scaling.x = 1 + Math.sin(this.time * 4) * 0.08;
         visual.selection.scaling.z = 1 + Math.sin(this.time * 4) * 0.08;
-        visual.root.position.y = Math.sin(this.time * 3) * 0.018;
+        if (!leaping) visual.root.position.y = Math.sin(this.time * 3) * 0.018;
       } else {
         visual.selection.scaling.x = 1;
         visual.selection.scaling.z = 1;
-        visual.root.position.y *= 0.8;
+        if (!leaping) visual.root.position.y *= 0.8;
       }
       this.animateUnit(visual, dt);
     }

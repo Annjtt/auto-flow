@@ -150,6 +150,14 @@ export interface LobbySummary {
   phase: GamePhase;
 }
 
+export interface BattleJumpView {
+  fromX: number;
+  fromY: number;
+  /** Seconds left until the unit lands. */
+  remaining: number;
+  duration: number;
+}
+
 export interface BattleUnitView {
   uid: string;
   defId: string;
@@ -157,6 +165,10 @@ export interface BattleUnitView {
   team: 0 | 1;
   x: number;
   y: number;
+  /** Yaw angle in radians, the direction the model is facing. */
+  facing: number;
+  /** Present while the unit is in the air during an opening assassin leap. */
+  jump?: BattleJumpView;
   hp: number;
   maxHp: number;
   mana: number;
@@ -167,7 +179,7 @@ export interface BattleUnitView {
 
 export interface BattleEffectView {
   id: string;
-  kind: 'hit' | 'cast' | 'heal' | 'shield' | 'death' | 'miss';
+  kind: 'hit' | 'cast' | 'heal' | 'shield' | 'death' | 'miss' | 'jump';
   x: number;
   y: number;
   team: 0 | 1;

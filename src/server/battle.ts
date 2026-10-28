@@ -5,6 +5,8 @@ import {
   type TeamBonuses,
 } from '../shared/content';
 import {
+  BOARD_HEIGHT,
+  BOARD_WIDTH,
   STAR_MULTIPLIER,
   type AbilityDef,
   type BattleEffectView,
@@ -12,6 +14,21 @@ import {
   type BattleUnitView,
   type UnitView,
 } from '../shared/types';
+
+/** Seconds a unit spends crossing one board cell. */
+const CELL_STEP_TIME = 0.4;
+/** Duration of the opening assassin leap. */
+const ASSASSIN_JUMP_TIME = 0.7;
+const CELL_DIRECTIONS = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+  { x: 1, y: 1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+  { x: -1, y: -1 },
+];
 
 interface BattleSideInput {
   ownerId: string;
@@ -43,10 +60,17 @@ interface SimUnit {
   damageMult: number;
   shield: number;
   attackTimer: number;
+  moveTimer: number;
   stunTimer: number;
   buffTimer: number;
   buffSpeed: number;
   alive: boolean;
+  /** Enemy this assassin jumped onto at the start of the round. */
+  huntTargetUid: string | null;
+  jumpTimer: number;
+  jumpDuration: number;
+  jumpFromX: number;
+  jumpFromY: number;
 }
 
 interface RawEffect extends BattleEffectView {
@@ -102,6 +126,7 @@ export class Battle {
     for (const unit of right.units) {
       this.units.push(this.makeUnit(unit, 1, right.ownerId, right.units, leftDebuff));
     }
+    this.assignAssassinJumps();
     this.checkEnd();
   }
 
@@ -142,10 +167,16 @@ export class Battle {
       damageMult: bonus.damageMult,
       shield: 0,
       attackTimer: 0.2 + this.rng() * 0.25,
+      moveTimer: 0.05 + this.rng() * 0.2,
       stunTimer: 0,
       buffTimer: 0,
       buffSpeed: 0,
       alive: true,
+      huntTargetUid: null,
+      jumpTimer: 0,
+      jumpDuration: 0,
+      jumpFromX: x,
+      jumpFromY: y,
     };
   }
 
@@ -155,22 +186,16 @@ export class Battle {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       this.updateTimers(unit, dt);
-      if (unit.stunTimer > 0) continue;
-      const target = this.nearestEnemy(unit);
+      if (unit.stunTimer > 0 || unit.jumpTimer > 0) continue;
+      const target = this.targetFor(unit);
       if (!target) continue;
-      const distance = Math.hypot(target.x - unit.x, target.y - unit.y);
-      if (distance <= unit.range + 0.4) {
+      if (this.inAttackRange(unit, target)) {
         if (unit.attackTimer <= 0) {
           this.attack(unit, target);
           unit.attackTimer = 1 / Math.max(0.2, this.currentAttackSpeed(unit));
         }
       } else {
-        const speed = 2.25;
-        const travel = Math.min(speed * dt, Math.max(0, distance - unit.range * 0.8));
-        if (distance > 0.001) {
-          unit.x += ((target.x - unit.x) / distance) * travel;
-          unit.y += ((target.y - unit.y) / distance) * travel;
-        }
+        this.advanceToward(unit, target, dt);
       }
       if (unit.alive && unit.mana >= unit.maxMana && this.nearestEnemy(unit)) {
         this.castAbility(unit);
@@ -190,6 +215,13 @@ export class Battle {
   private updateTimers(unit: SimUnit, dt: number): void {
     unit.attackTimer = Math.max(0, unit.attackTimer - dt);
     unit.stunTimer = Math.max(0, unit.stunTimer - dt);
+    const wasJumping = unit.jumpTimer > 0;
+    unit.jumpTimer = Math.max(0, unit.jumpTimer - dt);
+    if (wasJumping && unit.jumpTimer === 0) {
+      // The leap only decides where the assassin lands. After landing it fights
+      // nearby enemies instead of chasing the original target across the board.
+      unit.huntTargetUid = null;
+    }
     if (unit.buffTimer > 0) unit.buffTimer = Math.max(0, unit.buffTimer - dt);
   }
 
@@ -198,13 +230,153 @@ export class Battle {
     let bestDist = Infinity;
     for (const other of this.units) {
       if (!other.alive || other.team === unit.team) continue;
-      const dist = Math.hypot(other.x - unit.x, other.y - unit.y);
+      const dist = this.cellDistance(unit, other);
       if (dist < bestDist) {
         best = other;
         bestDist = dist;
       }
     }
     return best;
+  }
+
+  private targetFor(unit: SimUnit): SimUnit | null {
+    if (unit.huntTargetUid) {
+      const hunted = this.units.find(
+        (other) => other.uid === unit.huntTargetUid && other.alive && other.team !== unit.team,
+      );
+      if (hunted) return hunted;
+      unit.huntTargetUid = null;
+    }
+    return this.nearestEnemy(unit);
+  }
+
+  private cellDistance(a: { x: number; y: number }, b: { x: number; y: number }): number {
+    return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  }
+
+  private inAttackRange(unit: SimUnit, target: SimUnit): boolean {
+    return this.cellDistance(unit, target) <= unit.range;
+  }
+
+  private cellInAttackRange(x: number, y: number, target: SimUnit, range: number): boolean {
+    return Math.max(Math.abs(x - target.x), Math.abs(y - target.y)) <= range;
+  }
+
+  private unitAt(x: number, y: number, ignore?: SimUnit): SimUnit | undefined {
+    return this.units.find((other) => other.alive && other !== ignore && other.x === x && other.y === y);
+  }
+
+  private advanceToward(unit: SimUnit, target: SimUnit, dt: number): void {
+    unit.moveTimer = Math.max(0, unit.moveTimer - dt);
+    if (unit.moveTimer > 0) return;
+    const next = this.nextStep(unit, target);
+    if (!next) {
+      unit.moveTimer = 0.15;
+      return;
+    }
+    unit.x = next.x;
+    unit.y = next.y;
+    unit.moveTimer = CELL_STEP_TIME;
+  }
+
+  private nextStep(unit: SimUnit, target: SimUnit): { x: number; y: number } | null {
+    const startKey = this.cellKey(unit.x, unit.y);
+    const start = { x: unit.x, y: unit.y };
+    const frontier: { x: number; y: number }[] = [start];
+    const cameFrom = new Map<number, number>([[startKey, -1]]);
+    let goalKey = -1;
+
+    for (let head = 0; head < frontier.length && goalKey < 0; head++) {
+      const current = frontier[head];
+      for (const dir of CELL_DIRECTIONS) {
+        const nx = current.x + dir.x;
+        const ny = current.y + dir.y;
+        if (nx < 0 || ny < 0 || nx >= BOARD_WIDTH || ny >= BOARD_HEIGHT) continue;
+        if (this.unitAt(nx, ny, unit)) continue;
+        if (dir.x !== 0 && dir.y !== 0) {
+          // Do not slip diagonally between two occupied cells.
+          if (this.unitAt(current.x + dir.x, current.y, unit) || this.unitAt(current.x, current.y + dir.y, unit)) {
+            continue;
+          }
+        }
+        const key = this.cellKey(nx, ny);
+        if (cameFrom.has(key)) continue;
+        cameFrom.set(key, this.cellKey(current.x, current.y));
+        if (this.cellInAttackRange(nx, ny, target, unit.range)) {
+          goalKey = key;
+          break;
+        }
+        frontier.push({ x: nx, y: ny });
+      }
+    }
+
+    if (goalKey < 0) return null;
+    let stepKey = goalKey;
+    while (cameFrom.get(stepKey) !== startKey) {
+      const parent = cameFrom.get(stepKey);
+      if (parent === undefined) return null;
+      stepKey = parent;
+    }
+    return { x: stepKey % BOARD_WIDTH, y: Math.floor(stepKey / BOARD_WIDTH) };
+  }
+
+  private cellKey(x: number, y: number): number {
+    return y * BOARD_WIDTH + x;
+  }
+
+  private assignAssassinJumps(): void {
+    const assassins = this.units.filter(
+      (unit) => unit.alive && getUnitDef(unit.defId).unitClass === 'assassin',
+    );
+    for (const assassin of assassins) {
+      const enemies = this.units
+        .filter((unit) => unit.alive && unit.team !== assassin.team)
+        .sort((a, b) => this.cellDistance(b, assassin) - this.cellDistance(a, assassin));
+      for (const target of enemies) {
+        const cell = this.findJumpCell(assassin, target);
+        if (!cell) continue;
+        const fromX = assassin.x;
+        const fromY = assassin.y;
+        assassin.x = cell.x;
+        assassin.y = cell.y;
+        assassin.huntTargetUid = target.uid;
+        assassin.jumpTimer = ASSASSIN_JUMP_TIME;
+        assassin.jumpDuration = ASSASSIN_JUMP_TIME;
+        assassin.jumpFromX = fromX;
+        assassin.jumpFromY = fromY;
+        assassin.attackTimer = Math.max(assassin.attackTimer, ASSASSIN_JUMP_TIME);
+        assassin.moveTimer = Math.max(assassin.moveTimer, ASSASSIN_JUMP_TIME);
+        this.addEffect('jump', cell.x, cell.y, assassin.team, undefined, fromX, fromY, {
+          sourceUid: assassin.uid,
+          sourceDef: assassin.defId,
+        });
+        break;
+      }
+    }
+  }
+
+  private findJumpCell(assassin: SimUnit, target: SimUnit): { x: number; y: number } | null {
+    const free: { x: number; y: number }[] = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = target.x + dx;
+        const y = target.y + dy;
+        if (x < 0 || y < 0 || x >= BOARD_WIDTH || y >= BOARD_HEIGHT) continue;
+        if (this.unitAt(x, y, assassin)) continue;
+        free.push({ x, y });
+      }
+    }
+    if (free.length === 0) return null;
+    // Prefer a real jump over standing on the cell the assassin already occupies.
+    const awayFromStart = free.filter((cell) => cell.x !== assassin.x || cell.y !== assassin.y);
+    const pool = awayFromStart.length > 0 ? awayFromStart : free;
+    pool.sort(
+      (a, b) =>
+        Math.abs(b.x - assassin.x) + Math.abs(b.y - assassin.y) -
+        (Math.abs(a.x - assassin.x) + Math.abs(a.y - assassin.y)),
+    );
+    return pool[0];
   }
 
   private enemiesOf(unit: SimUnit): SimUnit[] {
@@ -282,7 +454,7 @@ export class Battle {
     const ability = def.ability;
     const starMult = STAR_MULTIPLIER[unit.star] ?? 1;
     const power = ability.power * starMult * unit.spellPower;
-    const target = this.nearestEnemy(unit);
+    const target = this.targetFor(unit);
     if (!target) return;
     unit.mana = 0;
     this.addEffect('cast', unit.x, unit.y, unit.team, undefined, undefined, undefined, {
@@ -458,20 +630,38 @@ export class Battle {
 
   snapshot(perspective: 0 | 1, opponentName: string): BattleSnapshot {
     const rotate = perspective === 1;
-    const units: BattleUnitView[] = this.units.map((u) => ({
-      uid: u.uid,
-      defId: u.defId,
-      star: u.star,
-      team: (rotate ? 1 - u.team : u.team) as 0 | 1,
-      x: rotate ? 7 - u.x : u.x,
-      y: rotate ? 7 - u.y : u.y,
-      hp: Math.max(0, Math.round(u.hp)),
-      maxHp: u.maxHp,
-      mana: Math.round(u.mana),
-      maxMana: u.maxMana,
-      shield: Math.round(u.shield),
-      alive: u.alive,
-    }));
+    const units: BattleUnitView[] = this.units.map((u) => {
+      const target = this.targetFor(u);
+      const facing = target
+        ? Math.atan2(target.x - u.x, target.y - u.y)
+        : u.team === 0
+          ? Math.PI
+          : 0;
+      return {
+        uid: u.uid,
+        defId: u.defId,
+        star: u.star,
+        team: (rotate ? 1 - u.team : u.team) as 0 | 1,
+        x: rotate ? 7 - u.x : u.x,
+        y: rotate ? 7 - u.y : u.y,
+        facing: rotate ? facing + Math.PI : facing,
+        jump:
+          u.jumpTimer > 0
+            ? {
+                fromX: rotate ? 7 - u.jumpFromX : u.jumpFromX,
+                fromY: rotate ? 7 - u.jumpFromY : u.jumpFromY,
+                remaining: u.jumpTimer,
+                duration: u.jumpDuration,
+              }
+            : undefined,
+        hp: Math.max(0, Math.round(u.hp)),
+        maxHp: u.maxHp,
+        mana: Math.round(u.mana),
+        maxMana: u.maxMana,
+        shield: Math.round(u.shield),
+        alive: u.alive,
+      };
+    });
     const effects: BattleEffectView[] = this.effects
       .filter((effect) => this.time - effect.time < 0.45)
       .map((effect) => ({
