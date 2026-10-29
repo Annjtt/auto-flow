@@ -12,14 +12,24 @@ import { createUnitModel, type UnitModel } from './unitModels';
 
 interface PreviewSlot {
   defId: string;
+  star: number;
   model: UnitModel;
   camera: ArcRotateCamera;
+}
+
+export interface PreviewOptions {
+  /** Maximum number of simultaneous previews. */
+  capacity?: number;
+  /** Dataset attribute (without the `data-` prefix) that marks slot elements. */
+  attribute?: string;
 }
 
 export class ShopPreview {
   private readonly engine: Engine;
   private readonly scene: Scene;
   private readonly canvas: HTMLCanvasElement;
+  private readonly capacity: number;
+  private readonly attribute: string;
   private readonly materials = new Map<string, StandardMaterial>();
   private readonly resizeObserver: ResizeObserver;
   private slots: (PreviewSlot | null)[] = [];
@@ -27,8 +37,10 @@ export class ShopPreview {
   private time = 0;
   private seq = 0;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, options: PreviewOptions = {}) {
     this.canvas = canvas;
+    this.capacity = Math.max(1, options.capacity ?? 5);
+    this.attribute = options.attribute ?? 'preview-index';
     this.engine = new Engine(canvas, true, {
       alpha: true,
       premultipliedAlpha: false,
@@ -54,15 +66,16 @@ export class ShopPreview {
     this.engine.runRenderLoop(() => this.render());
   }
 
-  setUnits(defIds: (string | null)[]): void {
-    const next = defIds.slice(0, 5);
+  setUnits(defIds: (string | null)[], stars: number[] = []): void {
+    const next = defIds.slice(0, this.capacity);
 
     for (let index = 0; index < next.length; index++) {
       const defId = next[index] ?? null;
+      const star = Math.max(1, Math.round(stars[index] ?? 1));
       const current = this.slots[index] ?? null;
-      if (current?.defId === defId) continue;
+      if (current?.defId === defId && current.star === star) continue;
       if (current) this.disposeSlot(current);
-      this.slots[index] = defId ? this.createSlot(defId, index) : null;
+      this.slots[index] = defId ? this.createSlot(defId, index, star) : null;
     }
 
     for (let index = next.length; index < this.slots.length; index++) {
@@ -84,7 +97,7 @@ export class ShopPreview {
     return material;
   }
 
-  private createSlot(defId: string, index: number): PreviewSlot {
+  private createSlot(defId: string, index: number, star: number): PreviewSlot {
     const def = getUnitDef(defId);
     const model = createUnitModel(
       {
@@ -92,8 +105,8 @@ export class ShopPreview {
         material: (key, diffuse, emissive) => this.material(key, diffuse, emissive),
       },
       def,
-      `shop-preview-${defId}-${this.seq++}`,
-      1,
+      `shop-preview-${defId}-${star}-${this.seq++}`,
+      star,
     );
 
     const mask = 1 << index;
@@ -116,7 +129,7 @@ export class ShopPreview {
     camera.minZ = 0.05;
     camera.maxZ = 30;
 
-    return { defId, model, camera };
+    return { defId, star, model, camera };
   }
 
   private measure(model: UnitModel): { center: Vector3; height: number } {
@@ -154,8 +167,8 @@ export class ShopPreview {
     const root = this.canvas.parentElement;
     this.slotElements = new Array(this.slots.length).fill(null);
     if (!root) return;
-    for (const element of root.querySelectorAll<HTMLElement>('[data-preview-index]')) {
-      const index = Number(element.dataset.previewIndex);
+    for (const element of root.querySelectorAll<HTMLElement>(`[data-${this.attribute}]`)) {
+      const index = Number(element.getAttribute(`data-${this.attribute}`));
       if (Number.isInteger(index) && index >= 0 && index < this.slots.length) {
         this.slotElements[index] = element;
       }
@@ -176,10 +189,15 @@ export class ShopPreview {
 
     for (let index = 0; index < this.slots.length; index++) {
       const slot = this.slots[index];
+      if (!slot) continue;
       const element = this.slotElements[index];
-      if (!slot || !element) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 1 || rect.height < 1) continue;
+      const rect = element?.isConnected ? element.getBoundingClientRect() : null;
+      // Hide the model while its card is being dragged or re-rendered.
+      if (!element || !rect || rect.width < 1 || rect.height < 1 || element.closest('.dragging')) {
+        slot.model.body.setEnabled(false);
+        continue;
+      }
+      slot.model.body.setEnabled(true);
       const x = (rect.left - bounds.left) / bounds.width;
       const y = 1 - (rect.bottom - bounds.top) / bounds.height;
       const width = rect.width / bounds.width;

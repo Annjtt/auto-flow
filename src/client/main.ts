@@ -16,8 +16,14 @@ import {
   type UnitView,
 } from '../shared/types';
 import { Net } from './net';
+import { traitIcon, traitLabel } from './icons';
 import { ArenaScene, MAP_THEME_ACCENTS, type FloatTextKind, type MapId } from './scene';
 import { ShopPreview } from './shopPreview';
+
+// Временный переключатель наборного шрифта: ?font=onest|golos|inter|rubik|nunito|manrope
+// (после выбора шрифта эту строку и пресеты в style.css можно оставить только для одного)
+const bodyFontParam = new URLSearchParams(location.search).get('font');
+if (bodyFontParam) document.body.dataset.bodyFont = bodyFontParam;
 
 function byId<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
@@ -205,6 +211,10 @@ const scene = new ArenaScene(
   currentMap,
 );
 const shopPreview = new ShopPreview(byId<HTMLCanvasElement>('shopPreview'));
+const benchPreview = new ShopPreview(byId<HTMLCanvasElement>('benchPreview'), {
+  capacity: BENCH_SIZE,
+  attribute: 'bench-preview',
+});
 
 function spawnFloatText(text: string, x: number, y: number, kind: FloatTextKind): void {
   if (floatLayer.childElementCount > 40) floatLayer.firstElementChild?.remove();
@@ -421,7 +431,9 @@ function resetToMenu(): void {
   setShopOpen(false);
   scene.clearUnits();
   shopPreview.setUnits([]);
+  benchPreview.setUnits([]);
   shopSig = '';
+  benchSig = '';
   delete document.body.dataset.phase;
   gameOver.classList.add('hidden');
   byId('spectatorBanner').classList.add('hidden');
@@ -535,7 +547,7 @@ function createDragGhost(defId: string, star: number): HTMLElement {
     <span class="drag-cost">${def.cost}</span>
     <span class="drag-stars">${star > 1 ? stars(star) : ''}</span>
     <span class="drag-name">${escapeHtml(def.name)}</span>
-    <span class="drag-traits">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]}</span>`;
+    <span class="drag-traits">${traitLabel(def.race, RACE_NAMES[def.race])}<i>·</i>${traitLabel(def.unitClass, CLASS_NAMES[def.unitClass])}</span>`;
   return el;
 }
 
@@ -668,7 +680,7 @@ function renderGame(): void {
   const focusPercent = Math.max(0, Math.min(1, self.board.length / Math.max(1, self.level)));
   hudFocusRing.style.strokeDasharray = `${(focusPercent * 276.46).toFixed(1)} 276.46`;
   shopGold.textContent = String(self.gold);
-  shopLevel.textContent = `Ур. ${self.level}`;
+  shopLevel.textContent = `lvl. ${self.level}`;
   updateClock();
   renderPlayers();
   renderSynergies();
@@ -807,7 +819,7 @@ function renderPlayers(): void {
               <i style="width:${hpPercent.toFixed(1)}%"></i>
             </div>
             <div class="leader-meta">
-              <span>ур. ${player.level}</span>
+              <span>lvl. ${player.level}</span>
               ${streak}
               ${player.alive ? '' : '<span class="dead-tag">выбыл</span>'}
             </div>
@@ -823,18 +835,7 @@ function renderPlayers(): void {
     <div class="leader-list">${rows}</div>`;
 }
 
-const SYNERGY_GLYPHS: Record<string, string> = {
-  human: '♜',
-  undead: '☠',
-  mech: '⚙',
-  beast: '✧',
-  demon: '◆',
-  elf: '❧',
-  warrior: '⚔',
-  mage: '✦',
-  hunter: '➶',
-  assassin: '✹',
-};
+const SYNERGY_ICON_FALLBACK = 'rune';
 
 function renderSynergies(): void {
   if (!room?.self) return;
@@ -847,7 +848,7 @@ function renderSynergies(): void {
     synergyPanel.innerHTML = `
       <div class="panel-head"><span>Синергии</span><b>0</b></div>
       <div class="synergy-empty">
-        <span class="syn-icon muted" aria-hidden="true">✧</span>
+        <span class="syn-icon muted" aria-hidden="true">${traitIcon(SYNERGY_ICON_FALLBACK)}</span>
         <div><b>Пока пусто</b><p>Выставьте бойцов на поле, чтобы открыть бонусы рас и классов.</p></div>
       </div>`;
     return;
@@ -860,10 +861,9 @@ function renderSynergies(): void {
           const target = synergy.next ?? synergy.threshold ?? Math.max(1, synergy.count);
           const percent = Math.max(0, Math.min(100, (synergy.count / Math.max(1, target)) * 100));
           const effect = synergy.effects[Math.max(0, synergy.tier - 1)] ?? synergy.effects[0] ?? '';
-          const glyph = SYNERGY_GLYPHS[synergy.key] ?? '✧';
           return `
             <div class="synergy-item ${synergy.active ? 'active' : ''} ${synergy.group} race-${synergy.key}">
-              <span class="syn-icon" aria-hidden="true">${glyph}</span>
+              <span class="syn-icon" aria-hidden="true">${traitIcon(synergy.key)}</span>
               <div class="syn-body">
                 <div class="syn-line"><b>${escapeHtml(synergy.name)}</b><span>${synergy.count} / ${target}</span></div>
                 <div class="syn-bar"><i style="width:${percent.toFixed(1)}%"></i></div>
@@ -891,8 +891,8 @@ function unitCardMarkup(
       <span class="cost">${def.cost}</span>
       <div class="unit-stars">${star > 1 ? stars(star) : ''}</div>
       <div class="unit-name">${escapeHtml(def.name)}</div>
-      <div class="unit-traits">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]}</div>
       <div class="unit-preview" data-preview-index="${previewIndex}"></div>
+      <div class="unit-traits">${traitLabel(def.race, RACE_NAMES[def.race])}<i>·</i>${traitLabel(def.unitClass, CLASS_NAMES[def.unitClass])}</div>
       <div class="unit-stats">
         <span>HP <b>${formatNumber(def.hp * mult)}</b></span>
         <span>ATK <b>${formatNumber(def.attack * mult)}</b></span>
@@ -957,12 +957,17 @@ function renderBench(): void {
     cards.push(`
       <button class="bench-card race-${def.race} ${selectedUid === unit.uid ? 'selected' : ''}"
         data-bench-uid="${unit.uid}" data-def="${def.id}" data-star="${unit.star}">
+        <span class="bench-preview" data-bench-preview="${i}" aria-hidden="true"></span>
         <span class="bench-stars">${unit.star > 1 ? stars(unit.star) : ''}</span>
         <span class="bench-cost">${def.cost}</span>
-        <span class="bench-name">${escapeHtml(def.name)}</span>
+        <span class="bench-name">${traitIcon(def.race)}<em>${escapeHtml(def.name)}</em></span>
       </button>`);
   }
   benchCards.innerHTML = cards.join('');
+  benchPreview.setUnits(
+    Array.from({ length: BENCH_SIZE }, (_, index) => self.bench[index]?.defId ?? null),
+    Array.from({ length: BENCH_SIZE }, (_, index) => self.bench[index]?.star ?? 1),
+  );
 }
 
 function renderSelectedPanel(): void {
@@ -993,7 +998,7 @@ function renderSelectedPanel(): void {
   selectedPanel.classList.remove('hidden');
   selectedPanel.innerHTML = `
     <h3>${escapeHtml(def.name)}</h3>
-    <div class="selected-meta">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]} · ${stars(unit.star)}</div>
+    <div class="selected-meta"><span>${traitLabel(def.race, RACE_NAMES[def.race])}</span><i>·</i><span>${traitLabel(def.unitClass, CLASS_NAMES[def.unitClass])}</span><i>·</i><span>${stars(unit.star)}</span></div>
     <div class="selected-stats">
       <span>HP ${formatNumber(def.hp * mult)}</span>
       <span>ATK ${formatNumber(def.attack * mult)}</span>
@@ -1338,7 +1343,7 @@ function showTooltip(defId: string, star: number, x: number, y: number): void {
   tooltip.classList.remove('player-tip');
   tooltip.innerHTML = `
     <div class="tip-name">${escapeHtml(def.name)} ${star > 1 ? stars(star) : ''}</div>
-    <div class="tip-meta">${RACE_NAMES[def.race]} · ${CLASS_NAMES[def.unitClass]} · ${def.cost} золота</div>
+    <div class="tip-meta">${traitLabel(def.race, RACE_NAMES[def.race])}<i>·</i>${traitLabel(def.unitClass, CLASS_NAMES[def.unitClass])}<i>·</i>${def.cost} золота</div>
     <div class="tip-stats">
       <span>HP ${formatNumber(def.hp * mult)}</span>
       <span>ATK ${formatNumber(def.attack * mult)}</span>
@@ -1413,7 +1418,7 @@ function showPlayerTooltip(playerId: string, x: number, y: number): void {
       <div class="tip-name">${escapeHtml(player.name)}${player.isBot ? ' · ИИ' : ''}</div>
       <div class="tip-lives">${player.lives} ${livesWord(player.lives)}</div>
     </div>
-    <div class="tip-meta">ур. ${player.level}${place}${streakText}${status}</div>
+    <div class="tip-meta">lvl. ${player.level}${place}${streakText}${status}</div>
     <div class="tip-comp-title">Состав · ${player.board.length}</div>
     <div class="tip-units">${unitRows || '<div class="tip-empty">Поле пустое</div>'}</div>
     <div class="tip-synergy-row"><span>Расы</span><b>${raceText || '—'}</b></div>

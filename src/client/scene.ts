@@ -1699,7 +1699,7 @@ export class ArenaScene {
       }
       visual.target = new Vector3(unit.x - 3.5, 0, unit.y - 3.5);
       const jumpFrom = this.dropJumps.get(unit.uid);
-      if (jumpFrom) {
+      if (jumpFrom && Vector3.Distance(jumpFrom, visual.target) > 0.05) {
         visual.root.position.copyFrom(jumpFrom);
         visual.leap = {
           from: jumpFrom.clone(),

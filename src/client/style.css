@@ -14,9 +14,29 @@
   --muted: #97a1b5;
   --line: rgba(227, 185, 100, 0.28);
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-  --heading: Georgia, 'Palatino Linotype', 'Times New Roman', serif;
-  --body: 'Trebuchet MS', 'Segoe UI', Tahoma, sans-serif;
+  --font-display: 'Unbounded', 'Onest', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-onest: 'Onest', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-golos: 'Golos Text', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-inter: 'Inter', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-rubik: 'Rubik', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-nunito: 'Nunito Sans', 'Segoe UI', Tahoma, sans-serif;
+  --font-text-manrope: 'Manrope', 'Segoe UI', Tahoma, sans-serif;
+  --heading: var(--font-display);
+  --body: var(--font-text-onest);
 }
+
+/* ---------- Body typeface presets ----------
+   Switch the running text without touching the rest of the stylesheet:
+     <body data-body-font="golos">      or      ?font=golos   in the URL
+     onest (default) | golos | inter | rubik | nunito | manrope
+   ------------------------------------------- */
+
+body[data-body-font='onest'] { --body: var(--font-text-onest); }
+body[data-body-font='golos'] { --body: var(--font-text-golos); }
+body[data-body-font='inter'] { --body: var(--font-text-inter); }
+body[data-body-font='rubik'] { --body: var(--font-text-rubik); }
+body[data-body-font='nunito'] { --body: var(--font-text-nunito); }
+body[data-body-font='manrope'] { --body: var(--font-text-manrope); }
 
 * {
   box-sizing: border-box;
@@ -332,9 +352,9 @@ input:focus {
 
 .btn {
   position: relative;
-  border: 1px solid rgba(227, 185, 100, 0.5);
-  border-radius: 3px;
-  background: linear-gradient(180deg, rgba(47, 66, 99, 0.88), rgba(17, 25, 42, 0.94));
+  border: 1px solid rgba(78, 78, 78, 0.5);
+  border-radius: 100px;
+  background: linear-gradient(180deg, rgba(45, 49, 58, 0.88), rgba(17, 25, 42, 0.94));
   color: #e8dcc2;
   padding: 10px 18px;
   letter-spacing: 0.03em;
@@ -343,7 +363,7 @@ input:focus {
 }
 
 .btn:hover {
-  border-color: var(--gold-bright);
+  border-color: var(--map-accent);
   filter: brightness(1.12);
 }
 
@@ -1036,13 +1056,14 @@ input:focus {
 }
 
 .btn-danger {
-  border-color: rgba(225, 102, 102, 0.55);
+  border-color: rgba(218, 82, 82, 0.37);
   color: #ffc0c0;
-  background: linear-gradient(180deg, rgba(86, 36, 42, 0.9), rgba(35, 13, 18, 0.95));
+  background: linear-gradient(180deg, rgba(86, 36, 42, 0.9), rgba(35, 13, 18, 0.637));
+  border-radius: 100px;
 }
 
 .btn-danger:hover:not(:disabled) {
-  border-color: #ff9d9d;
+  border-color: #612f2f7c;
   filter: brightness(1.15);
 }
 
@@ -2047,13 +2068,14 @@ input:focus {
 .battle-result .result-damage {
   display: inline-block;
   margin-top: 10px;
-  padding: 4px 10px;
-  border: 1px solid rgba(225, 112, 120, 0.45);
+  padding: 6px 12px;
+  border: 1px solid rgba(197, 72, 80, 0.45);
   background: rgba(45, 12, 18, 0.72);
-  color: #ffb3b8;
-  font-size: 11px;
+  color: #f7a2a7;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  border-radius: 100px;
 }
 
 @keyframes resultPop {

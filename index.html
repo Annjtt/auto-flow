@@ -5,10 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#080a0e" />
     <title>Auto Flow — автошахматы</title>
+    <link rel="preload" href="/fonts/unbounded-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/unbounded-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/onest-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/src/client/fonts.css" />
     <link rel="stylesheet" href="/src/client/style.css" />
     <link rel="stylesheet" href="/src/client/overhaul.css" />
   </head>
-  <body data-map="jaddy">
+  <body data-map="jaddy" data-body-font="onest">
     <div id="app">
       <div class="ambient-glow ambient-a"></div>
       <div class="ambient-glow ambient-b"></div>
@@ -65,7 +70,7 @@
                 <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
                 <button id="joinBtn" class="btn btn-primary" type="button">Войти</button>
               </div>
-              <p class="rail-note">Пятизначный код от хозяина зала. Игра идёт в реальном времени.</p>
+              <p class="rail-note">Пятизначный код от зала</p>
             </div>
 
             <div class="rail-tip">
@@ -77,7 +82,7 @@
           <main class="menu-main">
             <section class="menu-hero">
               <span class="eyebrow">Автошахматы · мультиплеер · ИИ</span>
-              <h1>Соберите отряд.<br /><em>Заберите арену.</em></h1>
+              <h1>Собери армию<br /><em>Достойную победы</em></h1>
               <p class="hero-copy">
                 Покупайте бойцов, открывайте синергии рас и классов, повышайте звёзды
                 и выставляйте армию. Бойцы сражаются сами — побеждает стратегия.
@@ -93,7 +98,7 @@
                   <span class="section-kicker">Select chessboard</span>
                   <h2>Выберите доску</h2>
                 </div>
-                <span class="section-note">4 арены · влияет только на поле боя</span>
+                <span class="section-note">4 тематических арены · влияет только на поле боя</span>
               </header>
               <div id="mapGrid" class="map-grid"></div>
             </section>
@@ -231,7 +236,7 @@
                 <div class="shop-title">
                   <span class="shop-rune" aria-hidden="true"></span>
                   <b>Магазин</b>
-                  <small id="shopLevel">Ур. 1</small>
+                  <small id="shopLevel">lvl. 1</small>
                 </div>
                 <div id="shopOdds" class="shop-odds"></div>
                 <div class="shop-head-actions">
@@ -273,6 +278,7 @@
                 <b id="benchCount">0 / 9</b>
               </div>
               <div id="benchCards" class="bench-cards"></div>
+              <canvas id="benchPreview" class="bench-preview" aria-hidden="true"></canvas>
             </div>
 
             <div class="dock-side dock-right">
