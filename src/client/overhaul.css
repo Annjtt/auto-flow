@@ -1301,36 +1301,221 @@ body[data-map='jaddy'] { --map-accent: #7de09a; }
   text-transform: uppercase;
 }
 
+/* Round result banner */
+
 .battle-result {
   position: absolute;
-  top: 37%;
+  top: 47%;
   left: 50%;
-  transform: translate(-50%, -50%);
   z-index: 17;
-  padding: 18px 44px;
-  border-radius: 18px;
-  border: 1px solid rgba(240, 224, 190, 0.14);
-  background: rgba(7, 9, 13, 0.55);
-  backdrop-filter: blur(3px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(820px, 84vw);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
   text-align: center;
+  transform: translate(-50%, -50%);
+  animation: resultRise 0.4s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+
+.game-overlay > .battle-result { pointer-events: none; }
+
+/* The art keeps its torn edges: no rounding and no clipping anywhere. */
+
+.result-art {
+  position: relative;
+  width: 100%;
+  isolation: isolate;
+}
+
+.result-art-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(42vh, 430px);
+  object-fit: contain;
+  filter: drop-shadow(0 22px 44px rgba(0, 0, 0, 0.62)) drop-shadow(0 0 70px rgba(0, 0, 0, 0.32));
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.battle-result.loss .result-art-img {
+  filter: drop-shadow(0 22px 44px rgba(0, 0, 0, 0.62)) drop-shadow(0 0 60px rgba(84, 104, 200, 0.22));
+}
+
+.battle-result.win .result-art-img {
+  filter: drop-shadow(0 22px 44px rgba(0, 0, 0, 0.62)) drop-shadow(0 0 64px rgba(255, 186, 80, 0.24));
+}
+
+/* Soft scrim above the art, below the title, so the big word stays readable. */
+.result-art::after {
+  content: '';
+  position: absolute;
+  inset: 10% 4%;
+  z-index: 1;
   pointer-events: none;
-  animation: resultPop 0.35s ease both;
+  background: radial-gradient(ellipse 66% 48% at 50% 50%, rgba(3, 5, 10, 0.66) 0%, rgba(3, 5, 10, 0.38) 46%, rgba(3, 5, 10, 0) 76%);
+  filter: blur(6px);
 }
 
-.battle-result .result-word {
+.result-word {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
   font-family: var(--heading);
-  font-size: clamp(30px, 4vw, 52px);
-  letter-spacing: 0.04em;
-  line-height: 1;
-  color: var(--hud-ivory);
+  font-weight: 400;
+  font-size: clamp(46px, 7.6vw, 114px);
+  line-height: 0.92;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.battle-result.win .result-word { color: #9ff0b0; text-shadow: 0 0 30px rgba(90, 220, 130, 0.45); }
-.battle-result.loss .result-word { color: #ff8d80; text-shadow: 0 0 30px rgba(230, 80, 70, 0.4); }
-.battle-result.draw .result-word { color: #e5c986; }
+.battle-result.win .result-word {
+  color: #ffdc8d;
+  background: linear-gradient(180deg, #fffdf2 0%, #ffe9b4 34%, #f0bd55 64%, #fff6dc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 1px rgba(46, 24, 2, 0.55)) drop-shadow(0 2px 0 rgba(94, 54, 6, 0.5))
+    drop-shadow(0 0 26px rgba(255, 191, 84, 0.45)) drop-shadow(0 14px 26px rgba(0, 0, 0, 0.7));
+}
 
-.battle-result .result-sub { margin-top: 6px; color: #b5bdc9; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
-.battle-result .result-damage { margin-top: 4px; color: #ff9c8e; font-size: 11px; letter-spacing: 0.08em; }
+.battle-result.loss .result-word {
+  font-size: clamp(37px, 5.8vw, 90px);
+  letter-spacing: 0.06em;
+  color: #ff9b8f;
+  background: linear-gradient(180deg, #ffe6ea 0%, #ff9b8f 40%, #d1566e 66%, #ffc9d8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 1px rgba(40, 4, 14, 0.55)) drop-shadow(0 2px 0 rgba(70, 8, 18, 0.55))
+    drop-shadow(0 0 26px rgba(214, 86, 110, 0.4)) drop-shadow(0 14px 26px rgba(0, 0, 0, 0.75));
+}
+
+.battle-result.draw .result-word {
+  color: #dfe7f7;
+  text-shadow: 0 0 30px rgba(150, 175, 255, 0.45), 0 12px 30px rgba(0, 0, 0, 0.72);
+}
+
+.result-word-plain {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+  margin-bottom: 10px;
+  font-size: clamp(37px, 6vw, 96px);
+}
+
+.result-report {
+  position: relative;
+  z-index: 3;
+  width: min(560px, 92%);
+  margin-top: -34px;
+  padding: 9px 18px 11px;
+  border-radius: 14px;
+  border: 1px solid var(--hud-border);
+  background: linear-gradient(180deg, rgba(12, 15, 22, 0.92), rgba(6, 8, 13, 0.96));
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.battle-result:not(.has-art) .result-report { margin-top: 4px; }
+
+.result-report::before {
+  content: '';
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hud-gold), transparent);
+  opacity: 0.55;
+}
+
+.battle-result.loss .result-report::before {
+  background: linear-gradient(90deg, transparent, #ff8d80, transparent);
+}
+
+.result-opponent {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+}
+
+.result-opponent span {
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+
+.result-opponent b {
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: var(--hud-ivory);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+}
+
+.result-stats {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  margin-top: 5px;
+}
+
+.result-stat {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 2px 12px;
+}
+
+.result-stat + .result-stat { border-left: 1px solid rgba(240, 224, 190, 0.12); }
+
+.result-stat-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+}
+
+.result-stat-copy small {
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--hud-dim);
+}
+
+.result-stat-copy b {
+  margin-top: 3px;
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: 18px;
+}
+
+.result-stat.damage.taken .result-stat-copy b { color: #ff9c8e; }
+.result-stat.damage.dealt .result-stat-copy b { color: #9ff0b0; }
+.result-stat.gold .result-stat-copy b { color: var(--hud-gold-bright); }
+
+@keyframes resultRise {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(0.94); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
 
 /* Selected unit panel */
 
@@ -1989,7 +2174,12 @@ body[data-map='jaddy'] { --map-accent: #7de09a; }
   .xp-orb { width: 30px; height: 30px; }
   .xp-orb b { font-size: 15px; }
   .selected-panel { display: none; }
-  .battle-result { padding: 12px 24px; }
+  .battle-result { width: min(620px, 94vw); top: 45%; }
+  .result-art-img { max-height: 30vh; }
+  .result-report { width: 94%; margin-top: -28px; padding: 7px 12px 9px; }
+  .result-opponent b { font-size: 13px; }
+  .result-stat { padding: 2px 8px; gap: 7px; }
+  .result-stat-copy b { font-size: 15px; }
   .menu-head-meta { display: none; }
   .menu-footer { flex-direction: column; gap: 4px; }
   .lobby-layout { grid-template-columns: 1fr; }
@@ -2037,6 +2227,12 @@ body[data-map='jaddy'] { --map-accent: #7de09a; }
   .selected-panel { display: none; }
   .phase-banner { display: none; }
   .opponent-line { display: none; }
+  .battle-result { top: 46%; width: 96vw; }
+  .result-art-img { max-height: 26vh; }
+  .result-word { font-size: clamp(33px, 12vw, 58px); letter-spacing: 0.05em; }
+  .result-report { width: 96%; margin-top: -26px; }
+  .result-opponent b { font-size: 12px; }
+  .result-stat-copy b { font-size: 14px; }
 
   .shop-bar { bottom: 104px; width: calc(100vw - 12px); }
   .shop-head { padding: 6px 8px; gap: 6px; }
@@ -2130,6 +2326,10 @@ body[data-map='jaddy'] { --map-accent: #7de09a; }
 
   .phase-banner { display: none; }
   .selected-panel { display: none; }
+  .battle-result { top: 48%; width: min(640px, 88vw); }
+  .result-art-img { max-height: 40vh; }
+  .result-word { font-size: clamp(37px, 6.6vw, 79px); }
+  .result-report { padding: 7px 14px 9px; }
 
   .shop-bar { bottom: 108px; width: min(1000px, calc(100vw - 16px)); }
   .shop-head { padding: 6px 10px; gap: 10px; }

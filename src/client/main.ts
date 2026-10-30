@@ -1022,20 +1022,61 @@ function renderBattleResult(): void {
     battleResult.classList.add('hidden');
     return;
   }
-  const damage = room.self.lastDamage;
-  const sig = `${battle.result}|${battle.opponentName}|${room.phase}|${damage}`;
-  if (sig === resultSig) return;
+  const self = room.self;
+  const damageTaken = self.lastDamage;
+  const damageDealt = self.lastDamageDealt ?? 0;
+  const goldEarned = self.lastGoldEarned ?? 0;
+  const sig = `${battle.result}|${battle.opponentName}|${room.phase}|${damageTaken}|${damageDealt}|${goldEarned}`;
+  if (sig === resultSig) {
+    battleResult.classList.remove('hidden');
+    return;
+  }
   resultSig = sig;
-  const word = battle.result === 'win' ? 'Победа' : battle.result === 'loss' ? 'Поражение' : 'Ничья';
-  const damageLine =
-    battle.result !== 'win' && damage > 0
-      ? `<div class="result-damage">−${damage} ${livesWord(damage)}</div>`
+
+  const outcome = battle.result;
+  const word = outcome === 'win' ? 'Победа' : outcome === 'loss' ? 'Поражение' : 'Ничья';
+  const art = outcome === 'win' ? '/img/win.png' : outcome === 'loss' ? '/img/loss.png' : '';
+
+  const damage = outcome === 'win' ? damageDealt : damageTaken;
+  const damageLabel = outcome === 'win' ? 'урон по врагу' : outcome === 'loss' ? 'урон по вам' : 'урон';
+  const damageTile =
+    damage > 0
+      ? `<div class="result-stat damage ${outcome === 'win' ? 'dealt' : 'taken'}">
+          <span class="res-icon heart" aria-hidden="true"></span>
+          <span class="result-stat-copy">
+            <small>${damageLabel}</small>
+            <b>−${damage}</b>
+          </span>
+        </div>`
       : '';
-  battleResult.className = `battle-result ${battle.result}`;
+  const goldTile =
+    goldEarned > 0
+      ? `<div class="result-stat gold">
+          <span class="res-icon coin" aria-hidden="true"></span>
+          <span class="result-stat-copy">
+            <small>золото за раунд</small>
+            <b>+${goldEarned}</b>
+          </span>
+        </div>`
+      : '';
+
+  battleResult.className = `battle-result ${outcome}${art ? ' has-art' : ''}`;
   battleResult.innerHTML = `
-    <div class="result-word">${word}</div>
-    <div class="result-sub">${escapeHtml(battle.opponentName)}</div>
-    ${damageLine}`;
+    ${
+      art
+        ? `<div class="result-art">
+            <img class="result-art-img" src="${art}" alt="${word}" draggable="false" />
+            <div class="result-word">${word}</div>
+          </div>`
+        : `<div class="result-word result-word-plain">${word}</div>`
+    }
+    <div class="result-report">
+      <div class="result-opponent">
+        <span>соперник</span>
+        <b>${escapeHtml(battle.opponentName)}</b>
+      </div>
+      <div class="result-stats">${damageTile}${goldTile}</div>
+    </div>`;
 }
 
 function renderPhaseBanner(): void {

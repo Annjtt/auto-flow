@@ -38,6 +38,8 @@ export class GamePlayer {
   streak = 0;
   lastResult: 'win' | 'loss' | 'draw' | null = null;
   lastDamage = 0;
+  lastDamageDealt = 0;
+  lastGoldEarned = 0;
   board: OwnedUnit[] = [];
   bench: OwnedUnit[] = [];
   shop: (string | null)[] = [];
@@ -285,6 +287,7 @@ export class Game {
 
   private tickCombat(dt: number): void {
     let allDone = true;
+    let applied = false;
     for (const runtime of this.battles) {
       if (!runtime.battle.result) {
         runtime.battle.step(dt);
@@ -302,6 +305,7 @@ export class Game {
         if (!runtime.applied) {
           runtime.applied = true;
           this.applyBattleResult(runtime);
+          applied = true;
         }
       } else {
         allDone = false;
@@ -316,7 +320,16 @@ export class Game {
       this.phase = 'result';
       this.timeLeft = 4;
       this.callbacks.roomUpdate();
+    } else if (applied) {
+      this.callbacks.roomUpdate();
     }
+  }
+
+  private roundIncome(player: GamePlayer): number {
+    const interest = Math.min(5, Math.floor(player.gold / 10));
+    const streakBonus = Math.abs(player.streak) >= 5 ? 2 : Math.abs(player.streak) >= 3 ? 1 : 0;
+    const winBonus = player.lastResult === 'win' ? 1 : 0;
+    return 5 + interest + streakBonus + winBonus;
   }
 
   private featuredBattle(): BattleRuntime | null {
@@ -378,12 +391,14 @@ export class Game {
         this.damagePlayer(b, baseDamage, 'draw');
       } else if (result === 'left') {
         const survivors = runtime.battle.survivors(0).length;
-        this.damagePlayer(b, Math.min(12, baseDamage + survivors), 'loss');
-        this.markWinner(a);
+        const dealt = Math.min(12, baseDamage + survivors);
+        this.damagePlayer(b, dealt, 'loss');
+        this.markWinner(a, dealt);
       } else if (result === 'right') {
         const survivors = runtime.battle.survivors(1).length;
-        this.damagePlayer(a, Math.min(12, baseDamage + survivors), 'loss');
-        this.markWinner(b);
+        const dealt = Math.min(12, baseDamage + survivors);
+        this.damagePlayer(a, dealt, 'loss');
+        this.markWinner(b, dealt);
       }
     } else if (result === 'left') {
       this.markWinner(a);
@@ -399,6 +414,11 @@ export class Game {
         this.callbacks.toast(player.id, 'Ваш отряд пал. Вы выбыли из матча.');
       }
     }
+
+    for (const player of [a, b]) {
+      if (!player || !player.alive) continue;
+      player.lastGoldEarned = this.roundIncome(player);
+    }
   }
 
   private assignPlacement(player: GamePlayer): void {
@@ -407,9 +427,10 @@ export class Game {
     player.eliminatedRound = this.round;
   }
 
-  private markWinner(player: GamePlayer): void {
+  private markWinner(player: GamePlayer, damageDealt = 0): void {
     player.lastResult = 'win';
     player.lastDamage = 0;
+    player.lastDamageDealt = damageDealt;
     player.streak = player.streak >= 0 ? player.streak + 1 : 1;
   }
 
@@ -418,6 +439,7 @@ export class Game {
     player.lives = Math.max(0, player.lives - damage);
     player.lastResult = result;
     player.lastDamage = damage;
+    player.lastDamageDealt = 0;
     if (result === 'loss') {
       player.streak = player.streak <= 0 ? player.streak - 1 : -1;
     } else {
@@ -439,10 +461,7 @@ export class Game {
     this.latestSnapshots.clear();
     for (const player of this.players) {
       if (!player.alive) continue;
-      const interest = Math.min(5, Math.floor(player.gold / 10));
-      const streakBonus = Math.abs(player.streak) >= 5 ? 2 : Math.abs(player.streak) >= 3 ? 1 : 0;
-      const winBonus = player.lastResult === 'win' ? 1 : 0;
-      player.gold += 5 + interest + streakBonus + winBonus;
+      player.gold += this.roundIncome(player);
       this.addXp(player, 2);
       if (!player.locked) {
         this.rollShop(player);
@@ -819,6 +838,8 @@ export class Game {
         placement: self.placement,
         lastResult: self.lastResult,
         lastDamage: self.lastDamage,
+        lastDamageDealt: self.lastDamageDealt,
+        lastGoldEarned: self.lastGoldEarned,
       };
     }
 

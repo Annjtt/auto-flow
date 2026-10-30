@@ -122,6 +122,10 @@ export interface SelfView {
   placement: number | null;
   lastResult: 'win' | 'loss' | 'draw' | null;
   lastDamage: number;
+  /** Damage this player's board dealt to the opponent's lives this round. */
+  lastDamageDealt: number;
+  /** Gold awarded for the round (base + interest + streak + win bonuses). */
+  lastGoldEarned: number;
 }
 
 export interface RoomView {

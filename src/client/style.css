@@ -2024,70 +2024,7 @@ input:focus {
   margin-top: 3px;
 }
 
-.battle-result {
-  position: absolute;
-  left: 50%;
-  top: 31%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  pointer-events: none;
-  animation: resultPop 0.35s ease-out;
-}
-
-.battle-result .result-word {
-  font-family: var(--heading);
-  font-size: clamp(48px, 8vw, 92px);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  line-height: 1;
-  text-shadow: 0 4px 40px rgba(0, 0, 0, 0.9);
-}
-
-.battle-result.win .result-word {
-  color: #f4d483;
-  text-shadow: 0 0 50px rgba(227, 185, 100, 0.45);
-}
-
-.battle-result.loss .result-word {
-  color: #e07078;
-  text-shadow: 0 0 50px rgba(207, 90, 99, 0.35);
-}
-
-.battle-result.draw .result-word {
-  color: #aec3e4;
-}
-
-.battle-result .result-sub {
-  color: #c9d4e6;
-  font-size: 12px;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  margin-top: 6px;
-}
-
-.battle-result .result-damage {
-  display: inline-block;
-  margin-top: 10px;
-  padding: 6px 12px;
-  border: 1px solid rgba(197, 72, 80, 0.45);
-  background: rgba(45, 12, 18, 0.72);
-  color: #f7a2a7;
-  font-size: 12px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  border-radius: 100px;
-}
-
-@keyframes resultPop {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.82);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
-}
+/* Round result banner lives in overhaul.css (art + report layout). */
 
 .float-layer {
   position: absolute;

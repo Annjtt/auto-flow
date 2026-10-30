@@ -9,6 +9,8 @@
     <link rel="preload" href="/fonts/unbounded-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/onest-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/img/win.png" as="image" />
+    <link rel="preload" href="/img/loss.png" as="image" />
     <link rel="stylesheet" href="/src/client/fonts.css" />
     <link rel="stylesheet" href="/src/client/style.css" />
     <link rel="stylesheet" href="/src/client/overhaul.css" />
@@ -227,7 +229,7 @@
           <aside id="synergyPanel" class="synergy-panel"></aside>
           <div id="selectedPanel" class="selected-panel hidden"></div>
           <div id="phaseBanner" class="phase-banner"></div>
-          <div id="battleResult" class="battle-result hidden"></div>
+          <div id="battleResult" class="battle-result hidden" role="status" aria-live="polite"></div>
           <div id="floatLayer" class="float-layer"></div>
 
           <div id="shopBar" class="shop-bar hidden">
