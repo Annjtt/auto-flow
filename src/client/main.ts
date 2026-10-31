@@ -17,6 +17,7 @@ import {
 } from '../shared/types';
 import { Net } from './net';
 import { traitIcon, traitLabel } from './icons';
+import { LeaderSparks } from './leaderSparks';
 import { ArenaScene, MAP_THEME_ACCENTS, type FloatTextKind, type MapId } from './scene';
 import { ShopPreview } from './shopPreview';
 
@@ -146,9 +147,11 @@ const benchCards = byId('benchCards');
 const selectedPanel = byId('selectedPanel');
 const synergyPanel = byId('synergyPanel');
 const playersPanel = byId('playersPanel');
+const leaderSparks = new LeaderSparks();
 const rulesBtn = byId<HTMLButtonElement>('rulesBtn');
 const surrenderBtn = byId<HTMLButtonElement>('surrenderBtn');
 const shopBar = byId('shopBar');
+const shopFrame = document.querySelector('.shop-frame') as HTMLElement;
 const benchBar = byId('benchBar');
 const battleResult = byId('battleResult');
 const phaseBanner = byId('phaseBanner');
@@ -172,7 +175,6 @@ const hudOpponent = byId('hudOpponent');
 const hudXpText = byId('hudXpText');
 const hudPhaseCard = byId('hudPhaseCard');
 const hudFocusRing = document.getElementById('hudFocusRing') as unknown as SVGCircleElement;
-const shopToggleLabel = shopToggleBtn.querySelector('b');
 const lobbyBoardPreview = byId('lobbyBoardPreview');
 const lobbyBoardName = byId('lobbyBoardName');
 
@@ -833,6 +835,7 @@ function renderPlayers(): void {
       <b>${aliveCount} / ${players.length}</b>
     </div>
     <div class="leader-list">${rows}</div>`;
+  leaderSparks.mount(playersPanel);
 }
 
 const SYNERGY_ICON_FALLBACK = 'rune';
@@ -1706,6 +1709,29 @@ document.addEventListener('keydown', (event) => {
       event.preventDefault();
       setShopOpen(!shopOpen);
     }
+  }
+  if ((event.key === 'f' || event.key === 'F') && currentScreen === 'game') {
+    const buy = byId<HTMLButtonElement>('xpBtn');
+    if (!buy.disabled) {
+      event.preventDefault();
+      net.send({ type: 'buy_xp' });
+    }
+  }
+});
+
+// Закрытие магазина при клике ВНЕ .shop-frame
+document.addEventListener('click', (event) => {
+  // 1. Если магазин и так закрыт — ничего не делаем
+  if (!shopOpen) return;
+
+  const target = event.target as HTMLElement;
+
+  // 2. Если кликнули по кнопке открытия магазина — игнорируем (у неё своя логика)
+  if (shopToggleBtn.contains(target)) return;
+
+  // 3. Если кликнули НЕ внутри .shop-frame — закрываем магазин
+  if (!shopFrame.contains(target)) {
+    setShopOpen(false);
   }
 });
 

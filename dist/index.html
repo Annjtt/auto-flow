@@ -11,8 +11,8 @@
     <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/img/win.png" as="image" />
     <link rel="preload" href="/img/loss.png" as="image" />
-    <script type="module" crossorigin src="/assets/index-Dl9dhhTw.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-rNPUYmLm.css">
+    <script type="module" crossorigin src="/assets/index-BJAPTGtp.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-B7RrlbE1.css">
   </head>
   <body data-map="jaddy" data-body-font="onest">
     <div id="app">
@@ -182,46 +182,70 @@
         <canvas id="renderCanvas" touch-action="none"></canvas>
         <div class="game-overlay">
           <header class="hud-top">
-            <div class="hud-cluster hud-left">
-              <div class="round-plaque">
-                <span class="round-kicker">Раунд</span>
-                <div class="round-value"><b id="hudRound">1</b><i>/ <span id="hudMaxRounds">24</span></i></div>
+            <section class="command-hud" aria-label="Раунд, ресурсы и опыт отряда">
+              <div class="chud-topline">
+                <div class="chud-round">
+                  <span class="round-kicker">раунд</span>
+                  <div class="chud-round-value">
+                    <b id="hudRound">1</b>
+                    <i>/<span id="hudMaxRounds">24</span></i>
+                  </div>
+                </div>
                 <div id="hudPhaseCard" class="round-phase">
                   <span class="phase-dot"></span>
                   <span id="hudPhaseLabel">подготовка</span>
                   <b id="hudTimer">32</b>
                 </div>
+                <div class="chud-tools">
+                  <button id="rulesBtn" class="icon-btn chud-tool" type="button" title="Правила" aria-label="Правила">?</button>
+                  <button id="surrenderBtn" class="icon-btn chud-tool danger" type="button" title="Сдаться" aria-label="Сдаться">✕</button>
+                </div>
               </div>
+
+              <div class="chud-stats">
+                <div class="chud-stat gold" title="Золото">
+                  <span class="res-icon coin" aria-hidden="true"></span>
+                  <b id="hudGold">0</b>
+                  <small>золото</small>
+                </div>
+                <div class="chud-stat lives" title="Жизни">
+                  <span class="res-icon heart" aria-hidden="true"></span>
+                  <b id="hudLives">30</b>
+                  <small>жизни</small>
+                </div>
+                <div class="chud-stat army" title="Бойцов в отряде / лимит уровня">
+                  <span class="chud-army-ring">
+                    <svg class="focus-ring" viewBox="0 0 100 100" aria-hidden="true">
+                      <circle class="focus-ring-track" cx="50" cy="50" r="44"></circle>
+                      <circle id="hudFocusRing" class="focus-ring-fill" cx="50" cy="50" r="44"></circle>
+                    </svg>
+                    <b id="hudUnitCount">0</b>
+                  </span>
+                  <span class="chud-cap">/<span id="hudLevelCap">2</span></span>
+                  <small>отряд</small>
+                </div>
+              </div>
+
+              <div class="chud-xp">
+                <button id="xpBtn" class="chud-icon xp" type="button" title="Купить опыт · 4 золота (F)" aria-label="Купить опыт">
+                  <span class="xp-plus" aria-hidden="true"></span>
+                  <span class="chud-key" aria-hidden="true">F</span>
+                </button>
+                <div class="chud-xp-meter">
+                  <div class="chud-xp-line">
+                    <span>уровень <b id="hudLevel">2</b></span>
+                    <small id="hudXpText">0 / 4</small>
+                  </div>
+                  <span class="xp-track"><em id="hudXpFill"></em></span>
+                </div>
+                <button id="shopToggleBtn" class="chud-icon shop" type="button" title="Магазин (B)" aria-label="Магазин">
+                  <span class="bag-glyph" aria-hidden="true"></span>
+                  <span class="chud-key" aria-hidden="true">B</span>
+                </button>
+              </div>
+
               <div id="hudOpponent" class="opponent-line">Соперник определится в бою</div>
-            </div>
-
-            <div class="hud-cluster hud-center">
-              <div class="focus-badge" title="Бойцов на поле / лимит уровня">
-                <svg class="focus-ring" viewBox="0 0 100 100" aria-hidden="true">
-                  <circle class="focus-ring-track" cx="50" cy="50" r="44"></circle>
-                  <circle id="hudFocusRing" class="focus-ring-fill" cx="50" cy="50" r="44"></circle>
-                </svg>
-                <div class="focus-core"><b id="hudUnitCount">0</b><span>/<span id="hudLevelCap">2</span></span></div>
-                <span class="focus-label">отряд</span>
-              </div>
-            </div>
-
-            <div class="hud-cluster hud-right">
-              <div class="resource-pill gold">
-                <span class="res-icon coin" aria-hidden="true"></span>
-                <b id="hudGold">0</b>
-                <small>золото</small>
-              </div>
-              <div class="resource-pill lives">
-                <span class="res-icon heart" aria-hidden="true"></span>
-                <b id="hudLives">30</b>
-                <small>жизни</small>
-              </div>
-              <div class="hud-buttons">
-                <button id="rulesBtn" class="icon-btn" type="button" title="Правила" aria-label="Правила">?</button>
-                <button id="surrenderBtn" class="icon-btn danger" type="button" title="Сдаться" aria-label="Сдаться">✕</button>
-              </div>
-            </div>
+            </section>
           </header>
 
           <aside id="playersPanel" class="players-panel"></aside>
@@ -262,17 +286,6 @@
           </div>
 
           <div class="board-dock">
-            <div class="dock-side dock-left">
-              <button id="xpBtn" class="xp-button" type="button" title="Купить опыт">
-                <span class="xp-orb"><b id="hudLevel">2</b></span>
-                <span class="xp-body">
-                  <span class="xp-title">Опыт <i>4</i></span>
-                  <span class="xp-track"><em id="hudXpFill"></em></span>
-                  <small id="hudXpText">0 / 4</small>
-                </span>
-              </button>
-            </div>
-
             <div id="benchBar" class="bench-bar">
               <div class="bench-head">
                 <span>Скамья</span>
@@ -280,13 +293,6 @@
               </div>
               <div id="benchCards" class="bench-cards"></div>
               <canvas id="benchPreview" class="bench-preview" aria-hidden="true"></canvas>
-            </div>
-
-            <div class="dock-side dock-right">
-              <button id="shopToggleBtn" class="shop-toggle" type="button" title="Открыть магазин">
-                <span class="bag-glyph" aria-hidden="true"></span>
-                <span class="shop-toggle-copy"><b>Магазин</b><small>B</small></span>
-              </button>
             </div>
           </div>
 
