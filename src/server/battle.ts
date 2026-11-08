@@ -533,6 +533,8 @@ export class Battle {
   }
 
   private shieldRecipients(unit: SimUnit, ability: AbilityDef): SimUnit[] {
+    // Starweaver's secondary value is the shield size, not the number of recipients.
+    if (unit.defId === 'starweaver') return [unit];
     const count = (ability.secondary ?? 1) >= 99 ? 99 : Math.max(1, Math.floor(ability.secondary ?? 1));
     return this.alliesOf(unit)
       .sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08090f" />
+    <title>Auto Flow · Map Lab</title>
+    <script type="module" crossorigin src="/assets/mapLab-BgbuvCwM.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/meshBuilder-Cav3HIRh.js">
+    <link rel="modulepreload" crossorigin href="/assets/mapObjects-CS4dGW8_.js">
+    <link rel="modulepreload" crossorigin href="/assets/passPostProcess-kQmIAJBz.js">
+    <link rel="stylesheet" crossorigin href="/assets/meshBuilder-BOE9TPTr.css">
+    <link rel="stylesheet" crossorigin href="/assets/mapLab-y9fc8BhB.css">
+  </head>
+  <body class="map-lab">
+    <div class="lab-app">
+      <header class="topbar">
+        <a class="brand" href="/" title="Вернуться в Auto Flow">
+          <span class="brand-mark"><i></i><b>AF</b></span>
+          <span class="brand-copy">
+            <b>MAP LAB</b>
+            <small>Auto Flow · редактор карт и декораций</small>
+          </span>
+        </a>
+
+        <nav class="mode-tabs" aria-label="Режим работы">
+          <button type="button" class="mode-tab active" data-tab="map"><span>01</span>Карта</button>
+          <button type="button" class="mode-tab" data-tab="object"><span>02</span>Объект</button>
+        </nav>
+
+        <div class="top-actions">
+          <div class="save-cluster">
+            <span id="saveStateLabel" class="save-state" data-state="saved">Автосохранение включено</span>
+            <span id="modifiedCount" class="modified-chip" data-state="default">Карт: 0</span>
+          </div>
+          <button id="undoBtn" class="btn subtle icon-btn" type="button" title="Отменить (Ctrl+Z)">↶</button>
+          <button id="redoBtn" class="btn subtle icon-btn" type="button" title="Повторить (Ctrl+Y)">↷</button>
+          <button id="newMapBtn" class="btn subtle" type="button">＋ Карта</button>
+          <button id="importBtn" class="btn subtle" type="button">Импорт</button>
+          <button id="applyBtn" class="btn primary" type="button" title="Отправить карты на сервер игры">Применить в игру</button>
+          <button id="exportBtn" class="btn subtle" type="button" title="Выбрать папку и сохранить JSON">Экспорт JSON</button>
+        </div>
+      </header>
+
+      <main class="lab-grid map-grid">
+        <aside class="panel map-panel">
+          <section class="map-half">
+            <div class="roster-head compact-head">
+              <div>
+                <span class="eyebrow">Библиотека</span>
+                <h2>Карты</h2>
+              </div>
+              <span id="mapCount" class="count-pill">0 / 4</span>
+            </div>
+
+            <div class="search-row">
+              <span class="search-icon">⌕</span>
+              <input id="mapSearch" type="search" placeholder="Поиск карты…" autocomplete="off" />
+            </div>
+
+            <div class="list-label"><span>Мои карты</span><i></i></div>
+            <div id="customMapList" class="map-list"></div>
+
+            <div class="list-label"><span>Шаблоны</span><i></i></div>
+            <div id="builtinMapList" class="map-list builtin"></div>
+          </section>
+
+          <section class="objects-half">
+            <div class="roster-head compact-head objects-head">
+              <div>
+                <span class="eyebrow">Сцена</span>
+                <h2>Объекты</h2>
+              </div>
+              <span id="objectCount" class="count-pill">0</span>
+            </div>
+            <div class="object-tools">
+              <span class="object-tools-hint">Клик — выбрать · двойной — фокус</span>
+              <button id="clearSelectionBtn" class="mini-link" type="button">Снять выбор</button>
+            </div>
+            <div id="objectList" class="object-list"></div>
+            <div id="objectEmpty" class="object-empty" hidden>
+              Выберите примитив в палитре и кликните по доске.<br />
+              <small>Объекты можно двигать, вращать и масштабировать гизмо.</small>
+            </div>
+          </section>
+        </aside>
+
+        <section class="stage panel">
+          <div class="stage-head">
+            <div class="stage-title-block">
+              <span id="stageEyebrow" class="eyebrow">Редактор карты</span>
+              <h1 id="stageTitle">Новая карта</h1>
+              <p id="stageSub" class="stage-sub">Выберите карту слева или создайте новую</p>
+            </div>
+            <div class="stage-tools map-stage-tools">
+              <span class="tool-label">Гизмо</span>
+              <div class="gizmo-picker" role="group" aria-label="Режим гизмо">
+                <button type="button" data-gizmo="move" class="active" title="Перемещение (W)">W · Двигать</button>
+                <button type="button" data-gizmo="rotate" title="Вращение (E)">E · Вращать</button>
+                <button type="button" data-gizmo="scale" title="Масштаб (R)">R · Масштаб</button>
+              </div>
+              <div class="snap-group" title="Привязка к сетке">
+                <label class="check-inline"><input id="snapToggle" type="checkbox" checked /> Привязка</label>
+                <select id="snapStep" class="mini-select" aria-label="Шаг привязки">
+                  <option value="0.1">0.1</option>
+                  <option value="0.25" selected>0.25</option>
+                  <option value="0.5">0.5</option>
+                  <option value="1">1</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="canvas-shell map-canvas-shell">
+            <canvas id="mapCanvas" aria-label="3D-превью карты"></canvas>
+            <div class="canvas-vignette" aria-hidden="true"></div>
+
+            <div class="canvas-topline">
+              <div class="hud-identity">
+                <span class="hud-rune"></span>
+                <div>
+                  <h3 id="hudName">Новая карта</h3>
+                  <div id="hudMeta" class="hud-meta"></div>
+                </div>
+              </div>
+              <div id="hudBadge" class="hud-badge">Редактируется</div>
+            </div>
+
+            <div class="canvas-hint">ЛКМ — выбрать · ПКМ — панорама · колесо — зум · F — фокус</div>
+
+            <div id="shapePalette" class="shape-palette" role="group" aria-label="Добавить примитив">
+              <button type="button" data-shape="box" title="Добавить куб (1)"><i>▣</i><span>Куб</span></button>
+              <button type="button" data-shape="sphere" title="Добавить сферу (2)"><i>●</i><span>Сфера</span></button>
+              <button type="button" data-shape="cylinder" title="Добавить цилиндр (3)"><i>▮</i><span>Цилиндр</span></button>
+              <button type="button" data-shape="cone" title="Добавить конус (4)"><i>▲</i><span>Конус</span></button>
+              <button type="button" data-shape="torus" title="Добавить кольцо (5)"><i>◎</i><span>Кольцо</span></button>
+              <button type="button" data-shape="plane" title="Добавить плиту (6)"><i>▬</i><span>Плита</span></button>
+              <button type="button" data-shape="pyramid" title="Добавить пирамиду (7)"><i>△</i><span>Пирамида</span></button>
+            </div>
+
+            <div id="placementHint" class="placement-hint" hidden>
+              Кликните по доске, чтобы поставить объект · Esc — отмена
+            </div>
+
+            <div class="canvas-bottomline map-bottomline">
+              <p id="selectionHud" class="hud-flavor">Ничего не выбрано</p>
+              <div class="canvas-controls">
+                <button type="button" class="canvas-btn" id="focusObjectBtn">Фокус объекта</button>
+                <button type="button" class="canvas-btn" id="focusBoardBtn">Общий вид</button>
+                <button type="button" class="canvas-btn subtle" id="deleteObjectBtn">Удалить</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="stage-bottom">
+            <div id="metricStrip" class="metric-strip"></div>
+            <div id="stageHint" class="stage-ability">
+              <span class="stage-ability-label">Совет</span>
+              <p>Примитивы добавляются кликом по палитре, а затем по доске. Выделяйте объекты прямо в сцене или в списке слева.</p>
+            </div>
+          </div>
+        </section>
+
+        <aside class="inspector panel">
+          <div class="inspector-tabs" role="tablist">
+            <button type="button" class="inspector-tab active" data-tab="map">Карта</button>
+            <button type="button" class="inspector-tab" data-tab="object">Объект</button>
+          </div>
+          <div id="inspectorBody" class="inspector-body"></div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <input id="importFile" type="file" accept="application/json,.json" hidden />
+  </body>
+</html>

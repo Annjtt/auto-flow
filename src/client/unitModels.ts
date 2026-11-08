@@ -4,19 +4,17 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import '@babylonjs/core/Meshes/Builders/boxBuilder';
 import '@babylonjs/core/Meshes/Builders/cylinderBuilder';
+import '@babylonjs/core/Meshes/Builders/planeBuilder';
 import '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import '@babylonjs/core/Meshes/Builders/torusBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Scene } from '@babylonjs/core/scene';
 import type { UnitDef } from '../shared/types';
+import type { TuningPart, TuningShape } from '../shared/tuning';
+import { authoredPalette, type AttackStyle, type UnitPalette } from '../shared/unitAppearance';
 
-export type AttackStyle = 'melee' | 'ranged' | 'magic' | 'beast';
-
-export interface UnitPalette {
-  body: string;
-  accent: string;
-  glow: string;
-}
+export type { AttackStyle, UnitPalette } from '../shared/unitAppearance';
+export { ATTACK_STYLE_BY_ID, HOVER_BY_ID, UNIT_PALETTES } from '../shared/unitAppearance';
 
 export interface WingPart {
   node: TransformNode;
@@ -56,49 +54,108 @@ export interface ModelContext {
   material: (key: string, diffuse: string, emissive?: string) => StandardMaterial;
 }
 
-export const UNIT_PALETTES: Record<string, UnitPalette> = {
-  squire: { body: '#c9b48a', accent: '#8b98a6', glow: '#ffd27a' },
-  lightfoot: { body: '#b9975b', accent: '#5f7d65', glow: '#8fffc0' },
-  arcanist: { body: '#8e7ac4', accent: '#d9b45a', glow: '#a98cff' },
-  paladin: { body: '#e3c98e', accent: '#f2dd9a', glow: '#ffe28a' },
-  ghoul: { body: '#7aa88a', accent: '#9b6b5a', glow: '#8fffa8' },
-  crypt_archer: { body: '#b8c8b0', accent: '#6d7a63', glow: '#b6ffb0' },
-  necromancer: { body: '#5b4a74', accent: '#89d0a8', glow: '#8affc0' },
-  bone_dragon: { body: '#b8c3b0', accent: '#7fcfa8', glow: '#b9ffe0' },
-  scrapbot: { body: '#8f9aa0', accent: '#c58b4a', glow: '#ffd18a' },
-  steamgunner: { body: '#a58a62', accent: '#7fa8b8', glow: '#ffb45e' },
-  sparkmage: { body: '#7d8fb5', accent: '#7ce6ff', glow: '#7cf0ff' },
-  siege_colossus: { body: '#7e878d', accent: '#c25f3f', glow: '#ff8a5a' },
-  direwolf: { body: '#8c7a66', accent: '#c7b299', glow: '#ffb070' },
-  boar_rider: { body: '#9b745e', accent: '#6e523f', glow: '#d6a05a' },
-  owl_sage: { body: '#c8b58d', accent: '#7fb08a', glow: '#b9ffe0' },
-  elder_bear: { body: '#7a5b3f', accent: '#5f8a5a', glow: '#ffc07a' },
-  imp: { body: '#b04a5d', accent: '#ff6b4a', glow: '#ff7a4a' },
-  hellhound: { body: '#7a3b3b', accent: '#ff5a2a', glow: '#ff6a2a' },
-  doomguard: { body: '#6e3a52', accent: '#d98a4a', glow: '#ff7a5a' },
-  pit_fiend: { body: '#8a3c33', accent: '#e0a040', glow: '#ff5a3a' },
-  scout: { body: '#7ea36b', accent: '#b8c78a', glow: '#c4ff9a' },
-  blade_dancer: { body: '#7a9f84', accent: '#d8b46a', glow: '#b8ffe0' },
-  starweaver: { body: '#8a8ac4', accent: '#e8d68a', glow: '#c9b8ff' },
-  ancient_warden: { body: '#5f7350', accent: '#9a8a5a', glow: '#b9ff9a' },
-};
-
-function fallbackPalette(def: UnitDef): UnitPalette {
-  const byRace: Record<string, UnitPalette> = {
-    human: { body: '#d7ad5b', accent: '#c9a46a', glow: '#ffe28a' },
-    undead: { body: '#77c79a', accent: '#6d8f78', glow: '#b9ffe0' },
-    mech: { body: '#9fb9c9', accent: '#c58b4a', glow: '#7cf0ff' },
-    beast: { body: '#c4864f', accent: '#9a7a52', glow: '#ffc07a' },
-    demon: { body: '#c75568', accent: '#d98a4a', glow: '#ff6a3a' },
-    elf: { body: '#9bc77f', accent: '#b8c78a', glow: '#b9ffb0' },
-  };
-  return byRace[def.race] ?? { body: '#b9a267', accent: '#8fa6c7', glow: '#ffe28a' };
+export interface CreateUnitModelOptions {
+  /** Partial palette overlay used by the unit lab to preview tuning changes. */
+  palette?: Partial<UnitPalette>;
+  /** Extra uniform scale applied on top of the grade scale. */
+  scale?: number;
+  /** Replaces the authored hover offset (used by game tuning). */
+  hover?: number;
+  /** Per-part transform overrides keyed by the mesh suffix, e.g. `torso-0`. */
+  parts?: Record<string, TuningPart>;
+  /** Builds added primitives without baking their transforms (the lab applies them itself). */
+  skipPartOverrides?: boolean;
 }
 
-export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string, star = 1): UnitModel {
-  const palette = UNIT_PALETTES[def.id] ?? fallbackPalette(def);
+const CUSTOM_EMISSIVE = '#0a0806';
+
+function customPartMaterial(
+  ctx: ModelContext,
+  def: UnitDef,
+  part: TuningPart,
+  palette: UnitPalette,
+): StandardMaterial {
+  const color = part.color ?? palette.accent;
+  const key = `${def.id}-custom-${color.replace('#', '')}-${part.glow ? 'glow' : 'solid'}`;
+  return ctx.material(key, color, part.glow ? color : CUSTOM_EMISSIVE);
+}
+
+function createCustomPartMesh(
+  scene: Scene,
+  name: string,
+  shape: TuningShape,
+  width: number,
+  height: number,
+  depth: number,
+): Mesh {
+  switch (shape) {
+    case 'sphere':
+      return MeshBuilder.CreateSphere(name, { diameter: width, segments: 12 }, scene);
+    case 'cylinder':
+      return MeshBuilder.CreateCylinder(
+        name,
+        { diameterTop: width, diameterBottom: width, height, tessellation: 16 },
+        scene,
+      );
+    case 'cone':
+      return MeshBuilder.CreateCylinder(
+        name,
+        { diameterTop: 0, diameterBottom: width, height, tessellation: 16 },
+        scene,
+      );
+    case 'torus':
+      return MeshBuilder.CreateTorus(name, { diameter: width, thickness: depth, tessellation: 28 }, scene);
+    case 'plane':
+      return MeshBuilder.CreatePlane(name, { width, height, sideOrientation: Mesh.DOUBLESIDE }, scene);
+    case 'box':
+    default:
+      return MeshBuilder.CreateBox(name, { width, height, depth }, scene);
+  }
+}
+
+function buildCustomParts(
+  ctx: ModelContext,
+  def: UnitDef,
+  palette: UnitPalette,
+  body: TransformNode,
+  uid: string,
+  parts: Record<string, TuningPart> | undefined,
+): void {
+  if (!parts) return;
+  const prefix = `${uid}-${def.id}-`;
+  for (const [key, part] of Object.entries(parts)) {
+    if (!part.shape) continue;
+    const mesh = createCustomPartMesh(
+      ctx.scene,
+      `${prefix}${key}`,
+      part.shape,
+      part.width ?? 0.2,
+      part.height ?? 0.2,
+      part.depth ?? 0.2,
+    );
+    mesh.parent = body;
+    mesh.material = customPartMaterial(ctx, def, part, palette);
+    mesh.isPickable = true;
+  }
+}
+
+export function getUnitPalette(def: UnitDef): UnitPalette {
+  return authoredPalette(def);
+}
+
+export function createUnitModel(
+  ctx: ModelContext,
+  def: UnitDef,
+  uid: string,
+  star = 1,
+  options?: CreateUnitModelOptions,
+): UnitModel {
+  const palette = { ...getUnitPalette(def), ...(options?.palette ?? {}) };
   const body = new TransformNode(`model-${uid}`, ctx.scene);
   const parts = buildUnit(ctx, def, palette, body, uid);
+  buildCustomParts(ctx, def, palette, body, uid, options?.parts);
+  if (!options?.skipPartOverrides) applyPartOverrides(body, uid, def.id, options?.parts);
+  if (options?.hover !== undefined) parts.hover = options.hover;
 
   parts.headBase = parts.head ? parts.head.rotation.clone() : Vector3.Zero();
   parts.weaponBase = parts.weapon ? parts.weapon.rotation.clone() : Vector3.Zero();
@@ -122,8 +179,39 @@ export function createUnitModel(ctx: ModelContext, def: UnitDef, uid: string, st
     height: parts.height,
     gradeOrbs: grade.orbs,
     gradeHalo: grade.halo,
-    gradeScale: grade.scale,
+    gradeScale: grade.scale * (options?.scale ?? 1),
   };
+}
+
+function applyPartOverrides(
+  body: TransformNode,
+  uid: string,
+  defId: string,
+  overrides: Record<string, TuningPart> | undefined,
+): void {
+  if (!overrides) return;
+  const prefix = `${uid}-${defId}-`;
+  for (const mesh of body.getChildMeshes()) {
+    if (!mesh.name.startsWith(prefix)) continue;
+    const override = overrides[mesh.name.slice(prefix.length)];
+    if (!override) continue;
+    mesh.setEnabled(override.visible);
+    mesh.position.set(
+      mesh.position.x + override.px,
+      mesh.position.y + override.py,
+      mesh.position.z + override.pz,
+    );
+    mesh.rotation.set(
+      mesh.rotation.x + (override.rx * Math.PI) / 180,
+      mesh.rotation.y + (override.ry * Math.PI) / 180,
+      mesh.rotation.z + (override.rz * Math.PI) / 180,
+    );
+    mesh.scaling.set(
+      mesh.scaling.x * override.sx,
+      mesh.scaling.y * override.sy,
+      mesh.scaling.z * override.sz,
+    );
+  }
 }
 
 function applyGrade(

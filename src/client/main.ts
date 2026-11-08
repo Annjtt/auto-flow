@@ -18,8 +18,11 @@ import {
 import { Net } from './net';
 import { traitIcon, traitLabel } from './icons';
 import { LeaderSparks } from './leaderSparks';
-import { ArenaScene, MAP_THEME_ACCENTS, type FloatTextKind, type MapId } from './scene';
+import { ArenaScene, type FloatTextKind, type MapId } from './scene';
 import { ShopPreview } from './shopPreview';
+import { loadTuningFromServer } from './tuningRuntime';
+import { BUILTIN_MAP_META, mapAccent } from '../shared/maps';
+import { getCustomMap, getCustomMaps, loadMapsFromServer } from './mapRuntime';
 
 // Временный переключатель наборного шрифта: ?font=onest|golos|inter|rubik|nunito|manrope
 // (после выбора шрифта эту строку и пресеты в style.css можно оставить только для одного)
@@ -66,50 +69,42 @@ interface MapOption {
   glow: string;
 }
 
-const MAP_OPTIONS: MapOption[] = [
-  {
-    id: 'kara',
-    name: 'Upper Tower Kara',
-    subtitle: 'Ночная башня',
-    light: '#cfd3e8',
-    dark: '#211f30',
-    glow: '#b07cff',
-  },
-  {
-    id: 'starry',
-    name: 'Starry Court',
-    subtitle: 'Звёздный двор',
-    light: '#dfe9f2',
-    dark: '#5f7489',
-    glow: '#7fd7ff',
-  },
-  {
-    id: 'ruins',
-    name: 'Shatty Ruins',
-    subtitle: 'Руины Шатти',
-    light: '#d9c4a4',
-    dark: '#6b5039',
-    glow: '#e8ae63',
-  },
-  {
-    id: 'jaddy',
-    name: 'Jaddy Forest',
-    subtitle: 'Лес Джадди',
-    light: '#a7c994',
-    dark: '#33503a',
-    glow: '#7de09a',
-  },
-];
+const MAP_OPTIONS: MapOption[] = BUILTIN_MAP_META.map((entry) => ({
+  id: entry.id,
+  name: entry.name,
+  subtitle: entry.subtitle,
+  light: entry.light,
+  dark: entry.dark,
+  glow: entry.glow,
+}));
 
-const MAP_IDS = new Set<MapId>(MAP_OPTIONS.map((entry) => entry.id));
+function mergeCustomMapOptions(): void {
+  for (let index = MAP_OPTIONS.length - 1; index >= 0; index--) {
+    if (!BUILTIN_MAP_META.some((entry) => entry.id === MAP_OPTIONS[index].id)) MAP_OPTIONS.splice(index, 1);
+  }
+  for (const doc of getCustomMaps()) {
+    MAP_OPTIONS.push({
+      id: doc.id,
+      name: doc.name,
+      subtitle: doc.subtitle,
+      light: doc.theme.tiles.playerLight,
+      dark: doc.theme.tiles.playerDark,
+      glow: doc.theme.accent,
+    });
+  }
+}
 
 function loadMap(): MapId {
   const stored = localStorage.getItem('autoflow.map');
-  return stored && MAP_IDS.has(stored as MapId) ? (stored as MapId) : 'jaddy';
+  return stored && MAP_OPTIONS.some((entry) => entry.id === stored) ? stored : 'jaddy';
+}
+
+function storedMapId(): string | null {
+  return localStorage.getItem('autoflow.map');
 }
 
 function mapOption(id: MapId): MapOption {
-  return MAP_OPTIONS.find((entry) => entry.id === id) ?? MAP_OPTIONS[3];
+  return MAP_OPTIONS.find((entry) => entry.id === id) ?? MAP_OPTIONS[0];
 }
 
 let room: RoomView | null = null;
@@ -249,8 +244,9 @@ function renderMapGrid(): void {
 
 function syncMapLabels(): void {
   const option = mapOption(currentMap);
+  const doc = getCustomMap(currentMap);
   document.body.dataset.map = currentMap;
-  document.body.style.setProperty('--map-accent', MAP_THEME_ACCENTS[currentMap]);
+  document.body.style.setProperty('--map-accent', mapAccent(currentMap, doc));
   lobbyBoardPreview.dataset.map = currentMap;
   lobbyBoardName.textContent = option.name;
 }
@@ -259,7 +255,7 @@ function selectMap(id: MapId): void {
   if (id === currentMap) return;
   currentMap = id;
   localStorage.setItem('autoflow.map', currentMap);
-  scene.setMap(currentMap);
+  scene.setMap(currentMap, getCustomMap(currentMap));
   syncMapLabels();
   renderMapGrid();
   toast(`Доска: ${mapOption(currentMap).name}`, 'success');
@@ -1567,7 +1563,7 @@ byId('refreshLobbies').addEventListener('click', () => net.send({ type: 'list_lo
 mapGrid.addEventListener('click', (event) => {
   const target = (event.target as HTMLElement).closest('[data-map-choice]') as HTMLElement | null;
   const id = target?.dataset.mapChoice;
-  if (!id || !MAP_IDS.has(id as MapId)) return;
+  if (!id || !MAP_OPTIONS.some((entry) => entry.id === id)) return;
   selectMap(id as MapId);
 });
 
@@ -1740,7 +1736,20 @@ window.setInterval(updateClock, 200);
 if (storedName) {
   playerNameInput.value = storedName;
 }
-renderMapGrid();
-syncMapLabels();
-const initialName = currentName();
-net.connect(initialName);
+async function boot(): Promise<void> {
+  // Pull the tuning published from the Unit Lab before the first room state
+  // arrives, so new models, animations and stats all use the same values.
+  await loadTuningFromServer();
+  // Custom maps published from the Map Lab are merged into the picker and can
+  // be restored from localStorage even if they were not available at startup.
+  await loadMapsFromServer();
+  mergeCustomMapOptions();
+  const stored = storedMapId();
+  currentMap = stored && MAP_OPTIONS.some((entry) => entry.id === stored) ? stored : currentMap;
+  scene.setMap(currentMap, getCustomMap(currentMap));
+  renderMapGrid();
+  syncMapLabels();
+  net.connect(currentName());
+}
+
+void boot();

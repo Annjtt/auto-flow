@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#08090f" />
+    <title>Auto Flow · Unit Lab</title>
+    <script type="module" crossorigin src="/assets/unitLab-D9Z6RfX2.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/meshBuilder-Cav3HIRh.js">
+    <link rel="modulepreload" crossorigin href="/assets/unitModels-CsMJBSc5.js">
+    <link rel="stylesheet" crossorigin href="/assets/meshBuilder-BOE9TPTr.css">
+    <link rel="stylesheet" crossorigin href="/assets/unitLab-DaI4L9DH.css">
+  </head>
+  <body>
+    <div class="lab-app">
+      <header class="topbar">
+        <a class="brand" href="/" title="Вернуться в Auto Flow">
+          <span class="brand-mark"><i></i><b>AF</b></span>
+          <span class="brand-copy">
+            <b>UNIT LAB</b>
+            <small>Auto Flow · инструмент настройки юнитов</small>
+          </span>
+        </a>
+
+        <nav class="mode-tabs" aria-label="Режим работы">
+          <button type="button" class="mode-tab active" data-mode="balance"><span>01</span>Баланс</button>
+          <button type="button" class="mode-tab" data-mode="model"><span>02</span>Модель</button>
+          <button type="button" class="mode-tab" data-mode="animation"><span>03</span>Анимация</button>
+        </nav>
+
+        <div class="top-actions">
+          <div class="save-cluster">
+            <span id="saveStateLabel" class="save-state" data-state="saved">Автосохранение включено</span>
+            <span id="modifiedCount" class="modified-chip" data-state="default">Всё по умолчанию</span>
+          </div>
+          <button id="copyBtn" class="btn subtle" type="button" title="Скопировать tuning JSON в буфер">Копировать</button>
+          <button id="importBtn" class="btn subtle" type="button">Импорт</button>
+          <button id="applyBtn" class="btn primary" type="button" title="Отправить баланс, модели и анимации на сервер игры">Применить в игру</button>
+          <button id="exportBtn" class="btn subtle" type="button" title="Выбрать папку и сохранить JSON">Экспорт JSON</button>
+          <button id="resetAllBtn" class="btn danger" type="button">Сброс</button>
+        </div>
+      </header>
+
+      <main class="lab-grid">
+        <aside class="roster panel">
+          <div class="roster-head">
+            <div>
+              <span class="eyebrow">Ростер</span>
+              <h2>Юниты</h2>
+            </div>
+            <span id="rosterCount" class="count-pill">24 / 24</span>
+          </div>
+
+          <div class="search-row">
+            <span class="search-icon">⌕</span>
+            <input id="searchInput" type="search" placeholder="Поиск: имя, способность, раса…" autocomplete="off" />
+          </div>
+
+          <div class="filter-block">
+            <div class="filter-label"><span>Раса</span><i></i></div>
+            <div id="raceFilters" class="chips"></div>
+            <div class="filter-label"><span>Класс</span><i></i></div>
+            <div id="classFilters" class="chips"></div>
+          </div>
+
+          <div id="rosterList" class="roster-list"></div>
+
+          <div class="roster-foot">
+            <span class="foot-dot"></span>
+            <p>Изменения хранятся в localStorage. Кнопка «Применить в игру» отправляет баланс, модели и анимации на сервер Auto Flow; обновите страницу игры, чтобы увидеть результат.</p>
+          </div>
+        </aside>
+
+        <section class="stage panel">
+          <div class="stage-head">
+            <div class="stage-title-block">
+              <span id="stageEyebrow" class="eyebrow">Баланс и механика</span>
+              <h1 id="stageTitle">Инструмент настройки юнитов</h1>
+            </div>
+            <div class="stage-tools">
+              <span class="tool-label">Звезда</span>
+              <div class="star-picker" role="group" aria-label="Звёздность модели">
+                <button type="button" data-star="1" class="active">1★</button>
+                <button type="button" data-star="2">2★</button>
+                <button type="button" data-star="3">3★</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="canvas-shell">
+            <canvas id="previewCanvas" aria-label="3D-превью юнита"></canvas>
+            <div class="canvas-vignette" aria-hidden="true"></div>
+
+            <div class="canvas-topline">
+              <div class="hud-identity">
+                <span class="hud-rune"></span>
+                <div>
+                  <h3 id="hudName">Оруженосец</h3>
+                  <div id="hudMeta" class="hud-meta"></div>
+                </div>
+              </div>
+              <div id="hudAbility" class="hud-ability"></div>
+            </div>
+
+            <div class="canvas-bottomline">
+              <p id="hudFlavor" class="hud-flavor"></p>
+              <div class="canvas-controls">
+                <button type="button" class="canvas-btn" data-preview="attack">Атака</button>
+                <button type="button" class="canvas-btn" data-preview="cast">Способность</button>
+                <button type="button" class="canvas-btn" data-preview="idle">Idle</button>
+                <button type="button" class="canvas-btn" data-preview="cycle">Цикл</button>
+                <button type="button" class="canvas-btn" data-preview="pause">Пауза</button>
+                <button type="button" class="canvas-btn subtle" data-preview="turntable">Вращение</button>
+              </div>
+            </div>
+
+            <div class="canvas-hint">ЛКМ — орбита · колесо — приближение</div>
+
+            <div class="timeline">
+              <div class="timeline-row"><span>Атака</span><i><b id="timelineAttack"></b></i></div>
+              <div class="timeline-row"><span>Каст</span><i><b id="timelineCast"></b></i></div>
+              <span id="playState" class="play-state" data-state="idle">Idle</span>
+            </div>
+          </div>
+
+          <div class="stage-bottom">
+            <div id="metricStrip" class="metric-strip"></div>
+            <div id="stageAbility" class="stage-ability"></div>
+          </div>
+        </section>
+
+        <aside id="inspector" class="inspector panel"></aside>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <input id="importFile" type="file" accept="application/json,.json" hidden />
+  </body>
+</html>

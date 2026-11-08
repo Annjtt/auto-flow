@@ -1,3 +1,7 @@
 node_modules
 tmp-panel-preview.html
 tmp-flame-test.html
+data/tuning.json
+data/tuning.json.tmp
+data/maps.json
+data/maps.json.tmp

@@ -24,8 +24,23 @@ import { Scene } from '@babylonjs/core/scene';
 import '@babylonjs/core/Culling/ray';
 import '@babylonjs/core/Rendering/edgesRenderer';
 import { getUnitDef } from '../shared/content';
+import {
+  BUILTIN_MAP_THEMES,
+  builtinTheme,
+  isBuiltinMapId,
+  themeForDoc,
+  type BuiltinMapId,
+  type MapDoc,
+  type MapId,
+  type MapTheme,
+} from '../shared/maps';
 import type { BattleEffectView, BattleSnapshot, UnitView } from '../shared/types';
+import { GROUND_Y, MapStage } from './mapStage';
+import { createMapObjectMesh } from './mapObjects';
 import { createUnitModel, type UnitModel } from './unitModels';
+import { computeAnimationFrame } from '../shared/unitAppearance';
+import type { TuningAnimation } from '../shared/tuning';
+import { getTunedAnimation, getTunedModelOptions, getTunedModelYaw } from './tuningRuntime';
 
 const ABILITY_COLORS: Record<string, string> = {
   squire: '#9fc7ff',
@@ -95,8 +110,6 @@ const PROJECTILE_STYLES: Record<string, string> = {
   necromancer: 'orb',
 };
 
-const ATTACK_TIME = 0.34;
-const CAST_TIME = 0.82;
 const METER_WIDTH = 0.62;
 const METER_Y_GAP = 0.078;
 const STAR_Y_GAP = 0.16;
@@ -115,224 +128,11 @@ const METER_TEX_WIDTH = 256;
 const HP_TEX_HEIGHT = 32;
 const MANA_TEX_HEIGHT = 24;
 
-const GROUND_Y = -1.15;
+export type { MapId };
 
-export type MapId = 'kara' | 'starry' | 'ruins' | 'jaddy';
-
-interface MapTheme {
-  label: string;
-  accent: string;
-  sky: string;
-  fog: string;
-  fogDensity: number;
-  hemiDiffuse: string;
-  hemiGround: string;
-  hemiIntensity: number;
-  dirDiffuse: string;
-  dirIntensity: number;
-  glow: number;
-  tiles: {
-    playerLight: string;
-    playerDark: string;
-    enemyLight: string;
-    enemyDark: string;
-  };
-  mats: Record<string, [string, string]>;
-}
-
-const MAP_THEMES: Record<MapId, MapTheme> = {
-  kara: {
-    label: 'Upper Tower Kara',
-    accent: '#b07cff',
-    sky: '#05050b',
-    fog: '#080810',
-    fogDensity: 0.016,
-    hemiDiffuse: '#9a92d8',
-    hemiGround: '#120f20',
-    hemiIntensity: 0.78,
-    dirDiffuse: '#ded8ff',
-    dirIntensity: 1.1,
-    glow: 0.5,
-    tiles: {
-      playerLight: '#c9cde3',
-      playerDark: '#373252',
-      enemyLight: '#acb1cc',
-      enemyDark: '#27243d',
-    },
-    mats: {
-      warStone: ['#2b2839', '#0a0910'],
-      warStoneDark: ['#17161f', '#060509'],
-      warBasalt: ['#110f18', '#040305'],
-      warIron: ['#252230', '#09080c'],
-      warRust: ['#3d2d50', '#120a1a'],
-      warBrass: ['#b79952', '#3a2a0c'],
-      warEmber: ['#6b3cc0', '#a76bff'],
-      boardRivet: ['#c3a86a', '#2a1e08'],
-      islandGround: ['#211e2c', '#07060b'],
-      islandCourt: ['#14121d', '#040309'],
-      islandRock: ['#2a2635', '#090810'],
-      islandRockDark: ['#14121c', '#040308'],
-      islandMoss: ['#2a3a39', '#080f0e'],
-      shoreSand: ['#565068', '#0b0910'],
-      ruinBone: ['#6c6682', '#171420'],
-      ruinRust: ['#4a3354', '#170a1e'],
-      warMetal: ['#282433', '#08070b'],
-      brazierFlame: ['#c79aff', '#9b5cff'],
-      starMat: ['#c1d2ff', '#bcd4ff'],
-      bloodMoon: ['#3a2f57', '#8060c0'],
-      seaWater: ['#0b1022', '#03050d'],
-      moonHalo: ['#2f2548', '#6c4bb0'],
-      moteEmber: ['#7c4ec0', '#c08bff'],
-      moteAsh: ['#625d74', '#a9a3bf'],
-      shoreFoam: ['#6b7fc4', '#8fa8e8'],
-    },
-  },
-  starry: {
-    label: 'Starry Court',
-    accent: '#7fd7ff',
-    sky: '#050e18',
-    fog: '#071624',
-    fogDensity: 0.012,
-    hemiDiffuse: '#a9c6e6',
-    hemiGround: '#101b26',
-    hemiIntensity: 0.9,
-    dirDiffuse: '#eaf3ff',
-    dirIntensity: 1.32,
-    glow: 0.42,
-    tiles: {
-      playerLight: '#e6edf5',
-      playerDark: '#7f95ab',
-      enemyLight: '#d6e2ee',
-      enemyDark: '#6b8298',
-    },
-    mats: {
-      warStone: ['#4a5666', '#141a21'],
-      warStoneDark: ['#2c3542', '#0b1016'],
-      warBasalt: ['#1c232c', '#06090d'],
-      warIron: ['#39424f', '#10151b'],
-      warRust: ['#6a5a3f', '#1c1409'],
-      warBrass: ['#d2b064', '#3d2c08'],
-      warEmber: ['#3b7fb5', '#7fd7ff'],
-      boardRivet: ['#d8c07a', '#2c230d'],
-      islandGround: ['#3d4a55', '#0c1116'],
-      islandCourt: ['#22303c', '#080d12'],
-      islandRock: ['#46525f', '#11171d'],
-      islandRockDark: ['#26303a', '#090d11'],
-      islandMoss: ['#38564a', '#0b1512'],
-      shoreSand: ['#9aa6ad', '#1a2026'],
-      ruinBone: ['#c6cbd2', '#282c31'],
-      ruinRust: ['#7a6444', '#221809'],
-      warMetal: ['#3c4553', '#10141a'],
-      brazierFlame: ['#ffd98a', '#ffb84a'],
-      starMat: ['#dbeaff', '#eaf4ff'],
-      bloodMoon: ['#b9d4ea', '#e6f4ff'],
-      seaWater: ['#0a2740', '#03101c'],
-      moonHalo: ['#496f8a', '#8fd2ff'],
-      moteEmber: ['#6aa0c4', '#aee6ff'],
-      moteAsh: ['#7c8a95', '#c2d4de'],
-      shoreFoam: ['#a6d8e8', '#d8f2fb'],
-    },
-  },
-  ruins: {
-    label: 'Shatty Ruins',
-    accent: '#e8ae63',
-    sky: '#140f0b',
-    fog: '#1d1610',
-    fogDensity: 0.015,
-    hemiDiffuse: '#e0c49c',
-    hemiGround: '#2a1c12',
-    hemiIntensity: 0.86,
-    dirDiffuse: '#ffe0ac',
-    dirIntensity: 1.35,
-    glow: 0.34,
-    tiles: {
-      playerLight: '#d9c4a4',
-      playerDark: '#8a6a4c',
-      enemyLight: '#cfb894',
-      enemyDark: '#7d5f43',
-    },
-    mats: {
-      warStone: ['#6b533c', '#1d140c'],
-      warStoneDark: ['#4a3729', '#120c08'],
-      warBasalt: ['#2e231b', '#0a0704'],
-      warIron: ['#3a3029', '#0f0b08'],
-      warRust: ['#7a4b2f', '#251006'],
-      warBrass: ['#c29a58', '#3a2608'],
-      warEmber: ['#a55a22', '#ff9a4a'],
-      boardRivet: ['#c6a36a', '#2c1e08'],
-      islandGround: ['#7a5e42', '#221508'],
-      islandCourt: ['#4a3928', '#140d07'],
-      islandRock: ['#6a533c', '#1c1209'],
-      islandRockDark: ['#3e3024', '#0f0a06'],
-      islandMoss: ['#4e5a35', '#141a0a'],
-      shoreSand: ['#b59a70', '#241c10'],
-      ruinBone: ['#cbb896', '#2a2419'],
-      ruinRust: ['#7a4b2f', '#1f0e05'],
-      warMetal: ['#453a31', '#120e0a'],
-      brazierFlame: ['#ffb45e', '#ff7b1c'],
-      starMat: ['#f5e0b0', '#ffe9b8'],
-      bloodMoon: ['#d8b070', '#f2c27a'],
-      seaWater: ['#2a3a3a', '#0b1414'],
-      moonHalo: ['#6a533c', '#c69a58'],
-      moteEmber: ['#a5702f', '#ffc46a'],
-      moteAsh: ['#8a7a62', '#c9b696'],
-      shoreFoam: ['#d8c3a2', '#efdfc0'],
-    },
-  },
-  jaddy: {
-    label: 'Jaddy Forest',
-    accent: '#7de09a',
-    sky: '#07120e',
-    fog: '#0a1a12',
-    fogDensity: 0.013,
-    hemiDiffuse: '#9fd2ad',
-    hemiGround: '#0c1c12',
-    hemiIntensity: 0.92,
-    dirDiffuse: '#e0ffd6',
-    dirIntensity: 1.22,
-    glow: 0.4,
-    tiles: {
-      playerLight: '#a7c994',
-      playerDark: '#4f7350',
-      enemyLight: '#9cbd8a',
-      enemyDark: '#436446',
-    },
-    mats: {
-      warStone: ['#3d4a37', '#0d130c'],
-      warStoneDark: ['#26301f', '#080c07'],
-      warBasalt: ['#18211a', '#050805'],
-      warIron: ['#2c352a', '#0a0f0a'],
-      warRust: ['#4d5a33', '#141a0a'],
-      warBrass: ['#b39a4e', '#302606'],
-      warEmber: ['#3c7d4a', '#7de09a'],
-      boardRivet: ['#b7a35a', '#251e08'],
-      islandGround: ['#2e452f', '#0a1209'],
-      islandCourt: ['#1b2b1d', '#060c07'],
-      islandRock: ['#3a4c38', '#0c110b'],
-      islandRockDark: ['#202b21', '#070a07'],
-      islandMoss: ['#4f7a3f', '#12220c'],
-      shoreSand: ['#8d8a56', '#1c1a0c'],
-      ruinBone: ['#9aa888', '#1d2418'],
-      ruinRust: ['#59663a', '#181d0a'],
-      warMetal: ['#2e3a2d', '#0a0e09'],
-      brazierFlame: ['#b9ff8a', '#79e06a'],
-      starMat: ['#cfefb0', '#e2ffc8'],
-      bloodMoon: ['#9fd28a', '#c8f0a8'],
-      seaWater: ['#0b2c2a', '#03100f'],
-      moonHalo: ['#3f6a4a', '#7ed69c'],
-      moteEmber: ['#4c8a4a', '#9aff8a'],
-      moteAsh: ['#6a8a6a', '#b6d8b0'],
-      shoreFoam: ['#7fd8b0', '#b0f0d4'],
-    },
-  },
-};
-
-export const MAP_THEME_ACCENTS: Record<MapId, string> = {
-  kara: MAP_THEMES.kara.accent,
-  starry: MAP_THEMES.starry.accent,
-  ruins: MAP_THEMES.ruins.accent,
-  jaddy: MAP_THEMES.jaddy.accent,
-};
+export const MAP_THEME_ACCENTS: Record<string, string> = Object.fromEntries(
+  Object.entries(BUILTIN_MAP_THEMES).map(([id, theme]) => [id, theme.accent]),
+);
 
 interface DragPathFx {
   material: StandardMaterial;
@@ -369,6 +169,7 @@ interface UnitVisual {
   selected: boolean;
   team: number;
   model: UnitModel;
+  animation: TuningAnimation;
   attackTimer: number;
   castTimer: number;
   idleSeed: number;
@@ -439,17 +240,23 @@ export class ArenaScene {
   private glowLayer: GlowLayer | null = null;
   private hemi: HemisphericLight | null = null;
   private dir: DirectionalLight | null = null;
-  private shoreFoamMat: StandardMaterial | null = null;
+  private stage: MapStage | null = null;
   private mapId: MapId;
+  private mapDoc: MapDoc | null = null;
+  private customMats: StandardMaterial[] = [];
   private dragPathFx: DragPathFx | null = null;
   private dropJumps = new Map<string, Vector3>();
-  private flames: { mesh: Mesh; light: PointLight | null; phase: number }[] = [];
-  private motes: { mesh: Mesh; baseX: number; baseZ: number; phase: number; speed: number }[] = [];
 
-  constructor(canvas: HTMLCanvasElement, callbacks: ArenaCallbacks, mapId: MapId = 'jaddy') {
+  constructor(
+    canvas: HTMLCanvasElement,
+    callbacks: ArenaCallbacks,
+    mapId: MapId = 'jaddy',
+    mapDoc: MapDoc | null = null,
+  ) {
     this.canvas = canvas;
     this.callbacks = callbacks;
     this.mapId = mapId;
+    this.mapDoc = mapDoc;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.03, 0.052, 0.096, 1);
@@ -484,8 +291,8 @@ export class ArenaScene {
     glow.intensity = 0.38;
     this.glowLayer = glow;
 
-    this.buildEnvironment();
-    this.buildArena();
+    this.buildStage();
+    this.buildCustomObjects();
     this.applyTheme();
     this.setupPointer();
     this.engine.runRenderLoop(() => {
@@ -507,128 +314,17 @@ export class ArenaScene {
     return mat;
   }
 
-  private buildArena(): void {
-    const stone = this.material('warStone', '#3a352e', '#0b0907');
-    const stoneDark = this.material('warStoneDark', '#24211d', '#070605');
-    const basalt = this.material('warBasalt', '#191817', '#050505');
-    const iron = this.material('warIron', '#2d2d30', '#0a0a0c');
-    const rust = this.material('warRust', '#5a3424', '#1b0803');
-    const brass = this.material('warBrass', '#8b6a2f', '#3a2608');
-    const ember = this.material('warEmber', '#7a2a10', '#ff5a14');
+  private buildStage(): void {
+    this.stage = new MapStage(this.scene, this.materials, {
+      base: this.mapDoc?.base ?? (isBuiltinMapId(this.mapId) ? this.mapId : 'jaddy'),
+      interactive: true,
+    });
+    this.stage.build();
+    this.tiles = this.stage.tiles;
+    this.buildHoverMarkers();
+  }
 
-    const bed = MeshBuilder.CreateBox('boardBed', { width: 8.94, height: 0.55, depth: 8.94 }, this.scene);
-    bed.position.y = -0.385;
-    bed.material = basalt;
-    bed.isPickable = false;
-
-    const table = MeshBuilder.CreateBox('warTable', { width: 10.9, height: 0.86, depth: 10.9 }, this.scene);
-    table.position.y = -0.75;
-    table.material = stone;
-    table.isPickable = false;
-
-    const plinth = MeshBuilder.CreateBox('warTablePlinth', { width: 7.6, height: 0.7, depth: 7.6 }, this.scene);
-    plinth.position.y = -1.42;
-    plinth.material = stoneDark;
-    plinth.isPickable = false;
-
-    const skirt = MeshBuilder.CreateBox('warTableSkirt', { width: 10.98, height: 0.24, depth: 10.98 }, this.scene);
-    skirt.position.y = -0.42;
-    skirt.material = iron;
-    skirt.isPickable = false;
-
-    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
-      const brace = MeshBuilder.CreateBox(`tableBrace-${sx}-${sz}`, { width: 1.7, height: 0.18, depth: 0.46 }, this.scene);
-      brace.position = new Vector3(sx * 4.5, -0.3, sz * 4.5);
-      brace.rotation.y = sx * sz > 0 ? Math.PI / 4 : -Math.PI / 4;
-      brace.material = rust;
-      brace.isPickable = false;
-
-      const foot = MeshBuilder.CreateBox(`tableFoot-${sx}-${sz}`, { width: 1.15, height: 0.55, depth: 1.15 }, this.scene);
-      foot.position = new Vector3(sx * 4.72, -1.32, sz * 4.72);
-      foot.material = stoneDark;
-      foot.isPickable = false;
-
-      const footCap = MeshBuilder.CreateBox(`tableFootCap-${sx}-${sz}`, { width: 1.28, height: 0.12, depth: 1.28 }, this.scene);
-      footCap.position = new Vector3(sx * 4.72, -1.06, sz * 4.72);
-      footCap.material = rust;
-      footCap.isPickable = false;
-    }
-
-    const seam = MeshBuilder.CreateBox('boardSeam', { width: 8.28, height: 0.04, depth: 8.28 }, this.scene);
-    seam.position.y = -0.122;
-    seam.material = ember;
-    seam.isPickable = false;
-
-    const frameN = MeshBuilder.CreateBox('boardFrameN', { width: 9.1, height: 0.2, depth: 0.38 }, this.scene);
-    frameN.position = new Vector3(0, -0.03, -4.18);
-    frameN.material = iron;
-    frameN.isPickable = false;
-    const frameS = frameN.clone('boardFrameS');
-    frameS.position.z = 4.18;
-    const frameW = MeshBuilder.CreateBox('boardFrameW', { width: 0.38, height: 0.2, depth: 9.1 }, this.scene);
-    frameW.position = new Vector3(-4.18, -0.03, 0);
-    frameW.material = iron;
-    frameW.isPickable = false;
-    const frameE = frameW.clone('boardFrameE');
-    frameE.position.x = 4.18;
-
-    const inlayN = MeshBuilder.CreateBox('boardInlayN', { width: 9.1, height: 0.035, depth: 0.1 }, this.scene);
-    inlayN.position = new Vector3(0, 0.077, -4.18);
-    inlayN.material = brass;
-    inlayN.isPickable = false;
-    const inlayS = inlayN.clone('boardInlayS');
-    inlayS.position.z = 4.18;
-    const inlayW = MeshBuilder.CreateBox('boardInlayW', { width: 0.1, height: 0.035, depth: 9.1 }, this.scene);
-    inlayW.position = new Vector3(-4.18, 0.077, 0);
-    inlayW.material = brass;
-    inlayW.isPickable = false;
-    const inlayE = inlayW.clone('boardInlayE');
-    inlayE.position.x = 4.18;
-
-    const rivetMat = this.material('boardRivet', '#8c7448', '#2a1c08');
-    for (const side of [-1, 1]) {
-      for (let i = -3; i <= 3; i++) {
-        const rivetA = MeshBuilder.CreateSphere(`rivetA-${side}-${i}`, { diameter: 0.09, segments: 5 }, this.scene);
-        rivetA.position = new Vector3(i * 1.16, 0.083, side * 4.18);
-        rivetA.material = rivetMat;
-        rivetA.isPickable = false;
-        const rivetB = MeshBuilder.CreateSphere(`rivetB-${side}-${i}`, { diameter: 0.09, segments: 5 }, this.scene);
-        rivetB.position = new Vector3(side * 4.18, 0.083, i * 1.16);
-        rivetB.material = rivetMat;
-        rivetB.isPickable = false;
-      }
-    }
-
-    const tilePlayerLight = this.material('tilePlayerLight', '#405564', '#0b1a24');
-    const tilePlayerDark = this.material('tilePlayerDark', '#23323c', '#050c11');
-    const tileEnemyLight = this.material('tileEnemyLight', '#5d3b31', '#1c0906');
-    const tileEnemyDark = this.material('tileEnemyDark', '#36211c', '#0f0403');
-
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        const playerSide = y >= 4;
-        const alt = (x + y) % 2 === 0;
-        const mat = playerSide
-          ? alt
-            ? tilePlayerLight
-            : tilePlayerDark
-          : alt
-            ? tileEnemyLight
-            : tileEnemyDark;
-        const tile = MeshBuilder.CreateBox(`tile-${x}-${y}`, { width: 0.96, height: 0.11, depth: 0.96 }, this.scene);
-        tile.position = new Vector3(x - 3.5, -0.055, y - 3.5);
-        tile.rotation.y = (((x * 7 + y * 13) % 5) - 2) * 0.0015;
-        tile.material = mat;
-        tile.metadata = { kind: 'cell', x, y };
-        tile.enableEdgesRendering(0.998);
-        tile.edgesWidth = 0.35;
-        tile.edgesColor = playerSide
-          ? new Color4(0.42, 0.72, 0.94, 0.16)
-          : new Color4(0.94, 0.46, 0.3, 0.14);
-        this.tiles.push(tile);
-      }
-    }
-
+  private buildHoverMarkers(): void {
     this.hoverMarkerMat = new StandardMaterial('hoverMarkerMat', this.scene);
     this.hoverMarkerMat.disableLighting = true;
     this.hoverMarkerMat.diffuseColor = Color3.Black();
@@ -656,454 +352,19 @@ export class ArenaScene {
     this.dropMarker.isPickable = false;
     this.dropMarker.setEnabled(false);
 
-    const centerRing = MeshBuilder.CreateTorus('centerRune', { diameter: 2.3, thickness: 0.035, tessellation: 64 }, this.scene);
-    centerRing.position = new Vector3(0, 0.004, 0);
-    centerRing.material = brass;
-    centerRing.isPickable = false;
-    const centerRingOuter = MeshBuilder.CreateTorus('centerRuneOuter', { diameter: 2.85, thickness: 0.02, tessellation: 64 }, this.scene);
-    centerRingOuter.position = new Vector3(0, 0.003, 0);
-    centerRingOuter.material = rust;
-    centerRingOuter.isPickable = false;
-
-    for (const [x, z] of [[0, 0], [7, 0], [0, 7], [7, 7]]) {
-      const rune = MeshBuilder.CreateTorus(`rune-${x}-${z}`, { diameter: 0.52, thickness: 0.035, tessellation: 32 }, this.scene);
-      rune.position = new Vector3(x - 3.5, 0.003, z - 3.5);
-      rune.material = ember;
-      rune.isPickable = false;
-    }
   }
 
-  private buildEnvironment(): void {
-    const ash = this.material('islandGround', '#2b2a22', '#080806');
-    const ashDark = this.material('islandCourt', '#1c1d18', '#050504');
-    const rock = this.material('islandRock', '#37342c', '#0b0a08');
-    const rockDark = this.material('islandRockDark', '#1e1d1a', '#050504');
-    const moss = this.material('islandMoss', '#2f3d2d', '#090f08');
-    const sand = this.material('shoreSand', '#5f5543', '#0b0906');
-    const bone = this.material('ruinBone', '#645b4c', '#17130d');
-    const rust = this.material('ruinRust', '#543024', '#180704');
-    const metal = this.material('warMetal', '#2b2a2e', '#0a090c');
-    const ember = this.material('brazierFlame', '#ffb45e', '#ff7b1c');
-    const starMat = this.material('starMat', '#9fc4ee', '#bcd8ff');
-    const moonMat = this.material('bloodMoon', '#3b1b17', '#8a2b1d');
-
-    const sea = this.material('seaWater', '#0a2630', '#031014');
-    sea.specularColor = new Color3(0.16, 0.28, 0.32);
-    const ocean = MeshBuilder.CreateGround('ocean', { width: 140, height: 140, subdivisions: 1 }, this.scene);
-    ocean.position.y = -2.55;
-    ocean.material = sea;
-    ocean.isPickable = false;
-
-    const islandBase = MeshBuilder.CreateCylinder(
-      'islandBase',
-      { height: 3.2, diameterTop: 27.2, diameterBottom: 20.5, tessellation: 20 },
-      this.scene,
-    );
-    islandBase.position.y = -2.9;
-    islandBase.material = rockDark;
-    islandBase.isPickable = false;
-
-    const islandTop = MeshBuilder.CreateCylinder(
-      'islandTop',
-      { height: 0.34, diameterTop: 27, diameterBottom: 27.4, tessellation: 20 },
-      this.scene,
-    );
-    islandTop.position.y = GROUND_Y - 0.17;
-    islandTop.material = ash;
-    islandTop.isPickable = false;
-
-    const court = MeshBuilder.CreateCylinder(
-      'islandCourt',
-      { height: 0.16, diameterTop: 12.4, diameterBottom: 13.2, tessellation: 18 },
-      this.scene,
-    );
-    court.position.y = GROUND_Y + 0.04;
-    court.material = ashDark;
-    court.isPickable = false;
-
-    const beach = MeshBuilder.CreateTorus(
-      'shoreBeach',
-      { diameter: 24.8, thickness: 2.3, tessellation: 64 },
-      this.scene,
-    );
-    beach.position.y = GROUND_Y - 0.04;
-    beach.scaling.y = 0.12;
-    beach.material = sand;
-    beach.isPickable = false;
-
-    const foamMat = this.material('shoreFoam', '#a6d8e8', '#d8f2fb');
-    foamMat.disableLighting = true;
-    foamMat.diffuseColor = Color3.Black();
-    foamMat.alpha = 0.2;
-    foamMat.backFaceCulling = false;
-    this.shoreFoamMat = foamMat;
-    for (const [diameter, thickness, fade] of [
-      [27.5, 0.08, 1],
-      [31, 0.06, 0.7],
-      [35.5, 0.045, 0.42],
-    ]) {
-      const ring = MeshBuilder.CreateTorus(`shoreFoam-${diameter}`, { diameter, thickness, tessellation: 64 }, this.scene);
-      ring.position.y = -2.53;
-      ring.material = foamMat;
-      ring.visibility = fade;
-      ring.isPickable = false;
-    }
-
-    let seed = 7331;
-    const rand = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-
-    for (let i = 0; i < 4; i++) {
-      const angle = rand() * Math.PI * 2;
-      const radius = 29 + rand() * 13;
-      const width = 1.2 + rand() * 1.8;
-      const height = 2 + rand() * 3.5;
-      const stack = MeshBuilder.CreateCylinder(
-        `seaStack-${i}`,
-        { diameterTop: width * 0.7, diameterBottom: width * 1.6, height, tessellation: 7 },
-        this.scene,
-      );
-      stack.position.set(Math.cos(angle) * radius, -2.55 + height / 2 - 0.35, Math.sin(angle) * radius);
-      stack.rotation.y = rand() * Math.PI;
-      stack.scaling.z = 0.8 + rand() * 0.5;
-      stack.material = i % 3 === 0 ? rockDark : rock;
-      stack.isPickable = false;
-    }
-
-    for (let i = 0; i < 16; i++) {
-      const angle = (i / 16) * Math.PI * 2 + rand() * 0.2;
-      const radius = 10.2 + rand() * 2;
-      const size = 0.7 + rand() * 1.4;
-      const height = 0.6 + rand() * 1.3;
-      const boulder = MeshBuilder.CreateCylinder(
-        `islandBoulder-${i}`,
-        { diameterTop: size * 0.7, diameterBottom: size, height, tessellation: 6 },
-        this.scene,
-      );
-      boulder.position.set(Math.cos(angle) * radius, GROUND_Y + height / 2 - 0.12, Math.sin(angle) * radius);
-      boulder.rotation.y = rand() * Math.PI;
-      boulder.rotation.z = (rand() - 0.5) * 0.14;
-      boulder.scaling.z = 0.8 + rand() * 0.45;
-      boulder.material = i % 4 === 0 ? rock : i % 3 === 0 ? rockDark : moss;
-      boulder.isPickable = false;
-    }
-
-    for (let i = 0; i < 12; i++) {
-      const angle = rand() * Math.PI * 2;
-      const radius = 13 + rand() * 2.3;
-      const size = 0.5 + rand() * 1.1;
-      const rockChunk = MeshBuilder.CreateCylinder(
-        `shoreRock-${i}`,
-        { diameterTop: size * 0.6, diameterBottom: size, height: size * 0.9, tessellation: 6 },
-        this.scene,
-      );
-      rockChunk.position.set(Math.cos(angle) * radius, -2.2 + rand() * 0.5, Math.sin(angle) * radius);
-      rockChunk.rotation.y = rand() * Math.PI;
-      rockChunk.material = i % 3 === 0 ? rock : rockDark;
-      rockChunk.isPickable = false;
-    }
-
-    for (let i = 0; i < 14; i++) {
-      const angle = rand() * Math.PI * 2;
-      const radius = 7.2 + rand() * 4.2;
-      const size = 0.55 + rand() * 1.3;
-      const patch = MeshBuilder.CreateCylinder(
-        `moss-${i}`,
-        { diameter: size, height: 0.018, tessellation: 10 },
-        this.scene,
-      );
-      patch.position.set(Math.cos(angle) * radius, GROUND_Y + 0.012, Math.sin(angle) * radius);
-      patch.scaling.z = 0.6 + rand() * 0.8;
-      patch.material = moss;
-      patch.isPickable = false;
-    }
-
-    for (const [x, z, lit] of [
-      [-7.1, -7.1, true],
-      [7.1, -7.1, true],
-      [-7.1, 7.1, false],
-      [7.1, 7.1, false],
-    ] as [number, number, boolean][]) {
-      this.addBrazier(x, z, metal, ember, lit);
-    }
-
-    for (const [x, z, scale, kind, tilt] of [
-      [-9.7, -4.5, 2, 'pawn', 0.08],
-      [9.7, -3.9, 2.05, 'pawn', -0.1],
-      [-9, 4.4, 1.65, 'bishop', 0.04],
-      [9, 4.7, 1.7, 'bishop', -0.05],
-      [1.4, -9.7, 1.7, 'pawn', 0.88],
-    ] as [number, number, number, 'pawn' | 'bishop', number][]) {
-      this.addRuinChessPiece(x, z, scale, kind, tilt, bone, rust);
-    }
-
-    const moteEmber = this.material('moteEmber', '#a04a20', '#ff6a24');
-    const moteAsh = this.material('moteAsh', '#5a5a58', '#9a9a96');
-    for (const mat of [moteEmber, moteAsh]) {
-      mat.disableLighting = true;
-      mat.specularColor = Color3.Black();
-      mat.alpha = 0.9;
-    }
-    for (let i = 0; i < 34; i++) {
-      const angle = rand() * Math.PI * 2;
-      const radius = 3.4 + rand() * 5.2;
-      const mote = MeshBuilder.CreateSphere(`mote-${i}`, { diameter: 0.055 + rand() * 0.05, segments: 4 }, this.scene);
-      mote.material = i % 3 === 0 ? moteEmber : moteAsh;
-      mote.isPickable = false;
-      this.motes.push({
-        mesh: mote,
-        baseX: Math.cos(angle) * radius,
-        baseZ: Math.sin(angle) * radius,
-        phase: i / 34,
-        speed: 0.035 + rand() * 0.05,
-      });
-    }
-
-    for (let i = 0; i < 44; i++) {
-      const star = MeshBuilder.CreateSphere(`star-${i}`, { diameter: 0.1 + rand() * 0.15, segments: 4 }, this.scene);
-      star.position.set(-36 + rand() * 72, -4 + rand() * 5.5, -20 - rand() * 24);
-      star.material = starMat;
-      star.isPickable = false;
-    }
-
-    const moon = MeshBuilder.CreateSphere('moon', { diameter: 2.9, segments: 20 }, this.scene);
-    moon.position.set(-5, -5, -30);
-    moon.material = moonMat;
-    moon.isPickable = false;
-
-    const moonHalo = MeshBuilder.CreateTorus('moonHalo', { diameter: 4.4, thickness: 0.06, tessellation: 64 }, this.scene);
-    moonHalo.position.copyFrom(moon.position);
-    moonHalo.rotation.x = Math.PI / 2;
-    moonHalo.material = this.material('moonHalo', '#3a1210', '#8a2b1d');
-    moonHalo.visibility = 0.4;
-    moonHalo.isPickable = false;
-
-    this.buildMapDecor();
-  }
-
-  private buildMapDecor(): void {
-    const rock = this.material('islandRock', '#37342c');
-    const rockDark = this.material('islandRockDark', '#1e1d1a');
-    const bone = this.material('ruinBone', '#645b4c');
-    const moss = this.material('islandMoss', '#2f3d2d');
-    const brass = this.material('warBrass', '#8b6a2f');
-    const glow = this.material('warEmber', '#7a2a10');
-
-    let seed = 419;
-    const rand = () => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-
-    if (this.mapId === 'kara') {
-      for (let i = 0; i < 7; i++) {
-        const angle = (i / 7) * Math.PI * 2 + 0.16;
-        const radius = 12.2 + rand() * 3.4;
-        const height = 5.5 + rand() * 5.5;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        const tower = MeshBuilder.CreateCylinder(
-          `karaTower-${i}`,
-          { diameterTop: 0.9 + rand() * 0.5, diameterBottom: 2 + rand() * 1.2, height, tessellation: 6 },
-          this.scene,
-        );
-        tower.position.set(x, GROUND_Y + height / 2 - 0.4, z);
-        tower.rotation.y = rand() * Math.PI;
-        tower.material = i % 3 === 0 ? rockDark : rock;
-        tower.isPickable = false;
-
-        const cap = MeshBuilder.CreateCylinder(
-          `karaTowerCap-${i}`,
-          { diameterTop: 0, diameterBottom: 1.5 + rand() * 0.5, height: 2.2, tessellation: 5 },
-          this.scene,
-        );
-        cap.position.set(x, GROUND_Y + height + 0.7, z);
-        cap.rotation.y = rand() * Math.PI;
-        cap.material = rockDark;
-        cap.isPickable = false;
-
-        const crystal = MeshBuilder.CreateSphere(
-          `karaCrystal-${i}`,
-          { diameter: 0.5 + rand() * 0.24, segments: 6 },
-          this.scene,
-        );
-        crystal.position.set(x, GROUND_Y + height + 1.5, z);
-        crystal.scaling.y = 1.8;
-        crystal.material = glow;
-        crystal.isPickable = false;
-      }
-      for (let i = 0; i < 4; i++) {
-        const angle = (i / 4) * Math.PI * 2 + 0.7;
-        const x = Math.cos(angle) * 8.6;
-        const z = Math.sin(angle) * 8.6;
-        const pillar = MeshBuilder.CreateBox(
-          `karaPillar-${i}`,
-          { width: 0.62, height: 3.1 + rand() * 0.7, depth: 0.62 },
-          this.scene,
-        );
-        pillar.position.set(x, GROUND_Y + 1.55, z);
-        pillar.rotation.y = angle;
-        pillar.material = rockDark;
-        pillar.isPickable = false;
-        const rune = MeshBuilder.CreateTorus(
-          `karaRune-${i}`,
-          { diameter: 0.7, thickness: 0.035, tessellation: 32 },
-          this.scene,
-        );
-        rune.position.set(x, GROUND_Y + 2.7, z);
-        rune.rotation.x = Math.PI / 2;
-        rune.material = brass;
-        rune.isPickable = false;
-      }
-    } else if (this.mapId === 'starry') {
-      for (let i = 0; i < 9; i++) {
-        const angle = (i / 9) * Math.PI * 2 + 0.24;
-        const radius = 9.4 + rand() * 3.6;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        const height = 1.6 + rand() * 1.8;
-        const trunk = MeshBuilder.CreateCylinder(
-          `starryTrunk-${i}`,
-          { diameterTop: 0.2, diameterBottom: 0.4, height, tessellation: 6 },
-          this.scene,
-        );
-        trunk.position.set(x, GROUND_Y + height / 2, z);
-        trunk.material = brass;
-        trunk.isPickable = false;
-        for (let layer = 0; layer < 3; layer++) {
-          const canopy = MeshBuilder.CreateSphere(
-            `starryCanopy-${i}-${layer}`,
-            { diameter: 1.5 - layer * 0.34, segments: 8 },
-            this.scene,
-          );
-          canopy.position.set(
-            x + (rand() - 0.5) * 0.4,
-            GROUND_Y + height + 0.2 + layer * 0.55,
-            z + (rand() - 0.5) * 0.4,
-          );
-          canopy.scaling.y = 0.72;
-          canopy.material = brass;
-          canopy.isPickable = false;
-        }
-        const orb = MeshBuilder.CreateSphere(
-          `starryOrb-${i}`,
-          { diameter: 0.28 + rand() * 0.2, segments: 6 },
-          this.scene,
-        );
-        orb.position.set(x, GROUND_Y + height + 2.2 + rand() * 0.8, z);
-        orb.material = glow;
-        orb.isPickable = false;
-      }
-      for (let i = 0; i < 3; i++) {
-        const ring = MeshBuilder.CreateTorus(
-          `starryRing-${i}`,
-          { diameter: 12 + i * 2.4, thickness: 0.035, tessellation: 64 },
-          this.scene,
-        );
-        ring.position.y = GROUND_Y + 0.05 + i * 0.02;
-        ring.material = brass;
-        ring.visibility = 0.35 - i * 0.07;
-        ring.isPickable = false;
-      }
-    } else if (this.mapId === 'ruins') {
-      for (let i = 0; i < 8; i++) {
-        const angle = (i / 8) * Math.PI * 2 + 0.43;
-        const radius = 9.8 + rand() * 3.2;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        const segments = 2 + Math.floor(rand() * 3);
-        let y = GROUND_Y;
-        for (let segment = 0; segment < segments; segment++) {
-          const height = 0.7 + rand() * 0.9;
-          const piece = MeshBuilder.CreateCylinder(
-            `ruinPillar-${i}-${segment}`,
-            { diameterTop: 0.55 - segment * 0.05, diameterBottom: 0.72, height, tessellation: 7 },
-            this.scene,
-          );
-          piece.position.set(x + (rand() - 0.5) * 0.12, y + height / 2, z + (rand() - 0.5) * 0.12);
-          piece.rotation.z = (rand() - 0.5) * 0.16;
-          piece.material = segment === segments - 1 ? bone : rock;
-          piece.isPickable = false;
-          y += height;
-        }
-        if (rand() > 0.45) {
-          const slab = MeshBuilder.CreateBox(
-            `ruinSlab-${i}`,
-            { width: 1.6 + rand() * 1.2, height: 0.18, depth: 0.7 + rand() * 0.5 },
-            this.scene,
-          );
-          slab.position.set(x + 0.7, GROUND_Y + 0.24, z + 0.5);
-          slab.rotation.y = rand() * Math.PI;
-          slab.rotation.z = 0.12;
-          slab.material = bone;
-          slab.isPickable = false;
-        }
-      }
-      for (let i = 0; i < 6; i++) {
-        const angle = rand() * Math.PI * 2;
-        const radius = 7.2 + rand() * 2.2;
-        const rubble = MeshBuilder.CreateBox(
-          `ruinRubble-${i}`,
-          { width: 0.5 + rand() * 0.7, height: 0.3 + rand() * 0.4, depth: 0.5 + rand() * 0.6 },
-          this.scene,
-        );
-        rubble.position.set(Math.cos(angle) * radius, GROUND_Y + 0.2, Math.sin(angle) * radius);
-        rubble.rotation.y = rand() * Math.PI;
-        rubble.material = rand() > 0.5 ? bone : rockDark;
-        rubble.isPickable = false;
-      }
-    } else {
-      for (let i = 0; i < 13; i++) {
-        const angle = (i / 13) * Math.PI * 2 + rand() * 0.25;
-        const radius = 9.2 + rand() * 4.4;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        const height = 2 + rand() * 2.6;
-        const trunk = MeshBuilder.CreateCylinder(
-          `jaddyTrunk-${i}`,
-          { diameterTop: 0.24, diameterBottom: 0.52, height, tessellation: 6 },
-          this.scene,
-        );
-        trunk.position.set(x, GROUND_Y + height / 2, z);
-        trunk.rotation.z = (rand() - 0.5) * 0.14;
-        trunk.material = rockDark;
-        trunk.isPickable = false;
-        for (let layer = 0; layer < 3; layer++) {
-          const canopy = MeshBuilder.CreateSphere(
-            `jaddyCanopy-${i}-${layer}`,
-            { diameter: 2.1 - layer * 0.4, segments: 8 },
-            this.scene,
-          );
-          canopy.position.set(
-            x + (rand() - 0.5) * 0.8,
-            GROUND_Y + height + layer * 0.5,
-            z + (rand() - 0.5) * 0.8,
-          );
-          canopy.scaling.y = 0.8;
-          canopy.material = moss;
-          canopy.isPickable = false;
-        }
-      }
-      for (let i = 0; i < 10; i++) {
-        const angle = rand() * Math.PI * 2;
-        const radius = 7.4 + rand() * 1.9;
-        const bush = MeshBuilder.CreateSphere(
-          `jaddyBush-${i}`,
-          { diameter: 0.8 + rand() * 0.9, segments: 7 },
-          this.scene,
-        );
-        bush.position.set(Math.cos(angle) * radius, GROUND_Y + 0.25, Math.sin(angle) * radius);
-        bush.scaling.y = 0.55;
-        bush.material = moss;
-        bush.isPickable = false;
-      }
+  private buildCustomObjects(): void {
+    if (!this.mapDoc) return;
+    for (const object of this.mapDoc.objects) {
+      if (!object.visible) continue;
+      const visual = createMapObjectMesh(this.scene, object, { pickable: false, namePrefix: 'mapObject' });
+      this.customMats.push(visual.material);
     }
   }
 
   private applyTheme(): void {
-    const theme = MAP_THEMES[this.mapId];
+    const theme = this.mapDoc ? themeForDoc(this.mapDoc) : builtinTheme(this.mapId);
     const sky = Color3.FromHexString(theme.sky);
     this.scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
     this.scene.fogColor = Color3.FromHexString(theme.fog);
@@ -1118,37 +379,22 @@ export class ArenaScene {
       this.dir.intensity = theme.dirIntensity;
     }
     if (this.glowLayer) this.glowLayer.intensity = theme.glow;
-    for (const [key, [diffuse, emissive]] of Object.entries(theme.mats)) {
-      const mat = this.materials.get(key);
-      if (!mat) continue;
-      mat.diffuseColor = Color3.FromHexString(diffuse);
-      mat.emissiveColor = Color3.FromHexString(emissive);
-    }
-    const tileKeys: [keyof MapTheme['tiles'], string][] = [
-      ['playerLight', 'tilePlayerLight'],
-      ['playerDark', 'tilePlayerDark'],
-      ['enemyLight', 'tileEnemyLight'],
-      ['enemyDark', 'tileEnemyDark'],
-    ];
-    for (const [themeKey, materialKey] of tileKeys) {
-      const mat = this.materials.get(materialKey);
-      if (mat) mat.diffuseColor = Color3.FromHexString(theme.tiles[themeKey]);
-    }
-    if (this.shoreFoamMat) {
-      this.shoreFoamMat.diffuseColor = Color3.Black();
-      const foam = Color3.FromHexString(theme.mats.shoreFoam[1]);
-      this.shoreFoamMat.emissiveColor = foam;
-    }
+    this.stage?.applyTheme(theme);
   }
 
-  setMap(mapId: MapId): void {
-    if (mapId === this.mapId) return;
+  setMap(mapId: MapId, mapDoc: MapDoc | null = null): void {
+    if (mapId === this.mapId && mapDoc === this.mapDoc) return;
     this.mapId = mapId;
+    this.mapDoc = mapDoc;
     this.rebuildWorld();
   }
 
   getMap(): MapId {
     return this.mapId;
+  }
+
+  getMapDocument(): MapDoc | null {
+    return this.mapDoc;
   }
 
   private rebuildWorld(): void {
@@ -1165,251 +411,18 @@ export class ArenaScene {
     for (const material of this.materials.values()) material.dispose();
     this.materials.clear();
     this.tiles = [];
-    this.flames = [];
-    this.motes = [];
     this.hoverMarker = null;
     this.hoverMarkerMat = null;
     this.dropMarker = null;
     this.dropMarkerMat = null;
-    this.shoreFoamMat = null;
     this.dragPathFx?.material.dispose();
     this.dragPathFx = null;
-    this.buildEnvironment();
-    this.buildArena();
+    for (const material of this.customMats) material.dispose();
+    this.customMats = [];
+    this.stage = null;
+    this.buildStage();
+    this.buildCustomObjects();
     this.applyTheme();
-  }
-
-  private addBrazier(x: number, z: number, metal: StandardMaterial, ember: StandardMaterial, lit: boolean): void {
-    const baseY = GROUND_Y;
-    const pole = MeshBuilder.CreateCylinder(`brazierPole-${x}-${z}`, { diameter: 0.16, height: 1.1, tessellation: 8 }, this.scene);
-    pole.position.set(x, baseY + 0.55, z);
-    pole.material = metal;
-    pole.isPickable = false;
-    const bowl = MeshBuilder.CreateCylinder(
-      `brazierBowl-${x}-${z}`,
-      { diameterTop: 0.58, diameterBottom: 0.34, height: 0.3, tessellation: 10 },
-      this.scene,
-    );
-    bowl.position.set(x, baseY + 1.22, z);
-    bowl.material = metal;
-    bowl.isPickable = false;
-    const flame = MeshBuilder.CreateCylinder(
-      `brazierFlame-${x}-${z}`,
-      { diameterTop: 0, diameterBottom: 0.42, height: 0.75, tessellation: 8 },
-      this.scene,
-    );
-    flame.position.set(x, baseY + 1.62, z);
-    flame.material = ember;
-    flame.isPickable = false;
-    let light: PointLight | null = null;
-    if (lit) {
-      light = new PointLight(`brazierLight-${x}-${z}`, new Vector3(x, baseY + 1.9, z), this.scene);
-      light.diffuse = new Color3(1, 0.58, 0.24);
-      light.specular = new Color3(1, 0.6, 0.3);
-      light.intensity = 0.75;
-      light.range = 13;
-    }
-    this.flames.push({ mesh: flame, light, phase: Math.random() * Math.PI * 2 });
-  }
-
-  private addRuinChessPiece(
-    x: number,
-    z: number,
-    scale: number,
-    kind: 'pawn' | 'bishop' | 'rook' | 'king' | 'knight',
-    tilt: number,
-    bodyMat: StandardMaterial,
-    accentMat: StandardMaterial,
-  ): void {
-    const root = new TransformNode(`chessRuin-${x}-${z}`, this.scene);
-    root.position.set(x, GROUND_Y, z);
-    root.rotation.y = (x * 13 + z * 7) % 3;
-    root.rotation.z = tilt;
-
-    const base = MeshBuilder.CreateCylinder(
-      `chessBase-${x}-${z}`,
-      { diameterTop: 0.86 * scale, diameterBottom: 1.1 * scale, height: 0.2 * scale, tessellation: 8 },
-      this.scene,
-    );
-    base.parent = root;
-    base.position.y = 0.1 * scale;
-    base.material = accentMat;
-    base.isPickable = false;
-
-    if (kind === 'pawn') {
-      const body = MeshBuilder.CreateCylinder(
-        `chessBody-${x}-${z}`,
-        { diameterTop: 0.3 * scale, diameterBottom: 0.54 * scale, height: 1.05 * scale, tessellation: 8 },
-        this.scene,
-      );
-      body.parent = root;
-      body.position.y = 0.68 * scale;
-      body.material = bodyMat;
-      body.isPickable = false;
-      const head = MeshBuilder.CreateSphere(`chessHead-${x}-${z}`, { diameter: 0.44 * scale, segments: 8 }, this.scene);
-      head.parent = root;
-      head.position.y = 1.38 * scale;
-      head.material = bodyMat;
-      head.isPickable = false;
-    } else if (kind === 'bishop') {
-      const body = MeshBuilder.CreateCylinder(
-        `chessBody-${x}-${z}`,
-        { diameterTop: 0.28 * scale, diameterBottom: 0.56 * scale, height: 1.25 * scale, tessellation: 8 },
-        this.scene,
-      );
-      body.parent = root;
-      body.position.y = 0.825 * scale;
-      body.material = bodyMat;
-      body.isPickable = false;
-      const collar = MeshBuilder.CreateCylinder(
-        `chessCollar-${x}-${z}`,
-        { diameterTop: 0.4 * scale, diameterBottom: 0.48 * scale, height: 0.14 * scale, tessellation: 8 },
-        this.scene,
-      );
-      collar.parent = root;
-      collar.position.y = 1.52 * scale;
-      collar.material = accentMat;
-      collar.isPickable = false;
-      const profile: [number, number][] = [
-        [0, 0],
-        [0.16, 0],
-        [0.25, 0.07],
-        [0.31, 0.2],
-        [0.29, 0.33],
-        [0.19, 0.47],
-        [0.16, 0.62],
-        [0.24, 0.78],
-        [0.25, 0.92],
-        [0.16, 1.06],
-        [0.07, 1.14],
-        [0, 1.17],
-      ];
-      const mitre = MeshBuilder.CreateLathe(
-        `chessMitre-${x}-${z}`,
-        {
-          shape: profile.map(([px, py]) => new Vector3(px * scale, py * scale, 0)),
-          tessellation: 10,
-        },
-        this.scene,
-      );
-      mitre.parent = root;
-      mitre.position.y = 1.46 * scale;
-      mitre.rotation.z = 0.04;
-      mitre.material = bodyMat;
-      mitre.isPickable = false;
-      const slash = MeshBuilder.CreateBox(
-        `chessSlash-${x}-${z}`,
-        { width: 0.34 * scale, height: 0.05 * scale, depth: 0.06 * scale },
-        this.scene,
-      );
-      slash.parent = root;
-      slash.position.set(0.01 * scale, 2.02 * scale, 0.24 * scale);
-      slash.rotation.z = 0.68;
-      slash.material = accentMat;
-      slash.isPickable = false;
-      const orb = MeshBuilder.CreateSphere(
-        `chessOrb-${x}-${z}`,
-        { diameter: 0.14 * scale, segments: 6 },
-        this.scene,
-      );
-      orb.parent = root;
-      orb.position.set(-0.03 * scale, 2.62 * scale, 0);
-      orb.material = accentMat;
-      orb.isPickable = false;
-    } else if (kind === 'rook') {
-      const body = MeshBuilder.CreateBox(
-        `chessBody-${x}-${z}`,
-        { width: 0.82 * scale, height: 1.45 * scale, depth: 0.82 * scale },
-        this.scene,
-      );
-      body.parent = root;
-      body.position.y = 0.92 * scale;
-      body.material = bodyMat;
-      body.isPickable = false;
-      const crown = MeshBuilder.CreateBox(
-        `chessCrown-${x}-${z}`,
-        { width: 0.96 * scale, height: 0.2 * scale, depth: 0.96 * scale },
-        this.scene,
-      );
-      crown.parent = root;
-      crown.position.y = 1.73 * scale;
-      crown.material = accentMat;
-      crown.isPickable = false;
-      for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as [number, number][]) {
-        const crenel = MeshBuilder.CreateBox(
-          `chessCrenel-${x}-${z}-${cx}-${cz}`,
-          { width: 0.18 * scale, height: 0.3 * scale, depth: 0.2 * scale },
-          this.scene,
-        );
-        crenel.parent = root;
-        crenel.position.set(cx * 0.34 * scale, 1.95 * scale, cz * 0.36 * scale);
-        crenel.material = bodyMat;
-        crenel.isPickable = false;
-      }
-    } else if (kind === 'king') {
-      const body = MeshBuilder.CreateCylinder(
-        `chessBody-${x}-${z}`,
-        { diameterTop: 0.54 * scale, diameterBottom: 0.74 * scale, height: 1.6 * scale, tessellation: 8 },
-        this.scene,
-      );
-      body.parent = root;
-      body.position.y = 0.96 * scale;
-      body.material = bodyMat;
-      body.isPickable = false;
-      const head = MeshBuilder.CreateSphere(`chessHead-${x}-${z}`, { diameter: 0.42 * scale, segments: 8 }, this.scene);
-      head.parent = root;
-      head.position.y = 1.86 * scale;
-      head.material = bodyMat;
-      head.isPickable = false;
-      const crossV = MeshBuilder.CreateBox(
-        `chessCrossV-${x}-${z}`,
-        { width: 0.1 * scale, height: 0.5 * scale, depth: 0.1 * scale },
-        this.scene,
-      );
-      crossV.parent = root;
-      crossV.position.y = 2.24 * scale;
-      crossV.material = accentMat;
-      crossV.isPickable = false;
-      const crossH = MeshBuilder.CreateBox(
-        `chessCrossH-${x}-${z}`,
-        { width: 0.38 * scale, height: 0.1 * scale, depth: 0.1 * scale },
-        this.scene,
-      );
-      crossH.parent = root;
-      crossH.position.y = 2.3 * scale;
-      crossH.material = accentMat;
-      crossH.isPickable = false;
-    } else {
-      const body = MeshBuilder.CreateCylinder(
-        `chessBody-${x}-${z}`,
-        { diameterTop: 0.46 * scale, diameterBottom: 0.68 * scale, height: 0.7 * scale, tessellation: 8 },
-        this.scene,
-      );
-      body.parent = root;
-      body.position.y = 0.53 * scale;
-      body.material = bodyMat;
-      body.isPickable = false;
-      const neck = MeshBuilder.CreateBox(
-        `chessNeck-${x}-${z}`,
-        { width: 0.34 * scale, height: 0.86 * scale, depth: 0.38 * scale },
-        this.scene,
-      );
-      neck.parent = root;
-      neck.position.set(0.04 * scale, 1.24 * scale, 0);
-      neck.rotation.z = -0.22;
-      neck.material = bodyMat;
-      neck.isPickable = false;
-      const head = MeshBuilder.CreateBox(
-        `chessHead-${x}-${z}`,
-        { width: 0.62 * scale, height: 0.3 * scale, depth: 0.34 * scale },
-        this.scene,
-      );
-      head.parent = root;
-      head.position.set(0.22 * scale, 1.66 * scale, 0);
-      head.rotation.z = -0.42;
-      head.material = accentMat;
-      head.isPickable = false;
-    }
   }
 
   private setupPointer(): void {
@@ -1846,7 +859,9 @@ export class ArenaScene {
 
   private createUnitVisual(unit: UnitView, team: number): UnitVisual {
     const def = getUnitDef(unit.defId);
+    const animation = getTunedAnimation(unit.defId);
     const root = new TransformNode(`unit-${unit.uid}`, this.scene);
+    root.rotation.y = getTunedModelYaw(unit.defId);
     const teamMat = this.material(team === 0 ? 'teamA' : 'teamB', team === 0 ? '#3f77c7' : '#a83d4d', team === 0 ? '#173a6e' : '#5c1724');
     const starMat = this.material('star', '#f2cc6b', '#9b6f16');
 
@@ -1868,9 +883,11 @@ export class ArenaScene {
       def,
       unit.uid,
       unit.star,
+      getTunedModelOptions(unit.defId),
     );
     model.body.parent = root;
     model.body.rotation.y = team === 0 ? Math.PI : 0;
+    model.attackStyle = animation.attackStyle;
     for (const mesh of model.body.getChildMeshes()) {
       mesh.metadata = { kind: 'unit', uid: unit.uid };
       mesh.isPickable = true;
@@ -1887,7 +904,7 @@ export class ArenaScene {
     selection.isPickable = false;
     selection.setEnabled(false);
 
-    const barY = Math.max(1.2, model.height) + 0.12;
+    const barY = Math.max(1.2, model.height * model.gradeScale) + 0.12;
 
     // Each meter is one billboard plane whose texture already contains the
     // frame, the empty track, the damage trail and the fill. Stacking those as
@@ -1973,6 +990,7 @@ export class ArenaScene {
       selected: false,
       team,
       model,
+      animation,
       attackTimer: 0,
       castTimer: 0,
       idleSeed: Math.random() * Math.PI * 2,
@@ -2172,8 +1190,13 @@ export class ArenaScene {
   private triggerAttack(uid: string): void {
     const visual = this.unitVisuals.get(uid);
     if (!visual) return;
-    if (visual.castTimer > 0.08) return;
-    visual.attackTimer = Math.max(visual.attackTimer, ATTACK_TIME);
+    const swap = visual.animation.swapAttackCast;
+    if ((swap ? visual.attackTimer : visual.castTimer) > 0.08) return;
+    if (swap) {
+      visual.castTimer = Math.max(visual.castTimer, visual.animation.castDuration);
+    } else {
+      visual.attackTimer = Math.max(visual.attackTimer, visual.animation.attackDuration);
+    }
   }
 
   private playAbilityCast(effect: BattleEffectView): void {
@@ -2185,8 +1208,11 @@ export class ArenaScene {
     const caster = new Vector3(effect.x - 3.5, 0, effect.y - 3.5);
     const targets = (effect.targets ?? []).map((target) => new Vector3(target.x - 3.5, 0, target.y - 3.5));
     const visual = effect.sourceUid ? this.unitVisuals.get(effect.sourceUid) : undefined;
-    if (visual) visual.castTimer = CAST_TIME;
-    const iconHeight = visual ? Math.max(1.5, visual.model.height + 0.18) : 1.55;
+    if (visual) {
+      if (visual.animation.swapAttackCast) visual.attackTimer = visual.animation.attackDuration;
+      else visual.castTimer = visual.animation.castDuration;
+    }
+    const iconHeight = visual ? Math.max(1.5, visual.model.height * visual.model.gradeScale + 0.18) : 1.55;
 
     this.spawnAura(caster, color, 0.9);
     this.spawnIcon(caster, icon, color, 0.9, iconHeight);
@@ -2716,70 +1742,56 @@ export class ArenaScene {
   }
 
   private animateEnvironment(): void {
-    for (const flame of this.flames) {
-      const flicker =
-        0.9 + Math.sin(this.time * 9 + flame.phase) * 0.09 + Math.sin(this.time * 23 + flame.phase * 1.7) * 0.04;
-      flame.mesh.scaling.y = flicker;
-      flame.mesh.scaling.x = 0.9 + (flicker - 0.9) * 0.4;
-      flame.mesh.scaling.z = flame.mesh.scaling.x;
-      flame.mesh.rotation.y = this.time * 0.7 + flame.phase;
-      if (flame.light) {
-        flame.light.intensity = 0.62 + (flicker - 0.9) * 1.6;
-      }
-    }
-    for (const mote of this.motes) {
-      const t = (this.time * mote.speed + mote.phase) % 1;
-      const fade = Math.sin(Math.PI * t);
-      mote.mesh.position.set(
-        mote.baseX + Math.sin(this.time * 0.45 + mote.phase * 9) * 0.5,
-        -0.5 + t * 4.6,
-        mote.baseZ + Math.cos(this.time * 0.38 + mote.phase * 7) * 0.5,
-      );
-      mote.mesh.scaling.setAll(0.5 + fade * 0.9);
-      mote.mesh.visibility = 0.12 + fade * 0.62;
-    }
+    this.stage?.animate(this.time);
   }
 
   private animateUnit(visual: UnitVisual, dt: number): void {
     const model = visual.model;
     if (visual.attackTimer > 0) visual.attackTimer = Math.max(0, visual.attackTimer - dt);
     if (visual.castTimer > 0) visual.castTimer = Math.max(0, visual.castTimer - dt);
+    const animation = visual.animation;
     const t = this.time + visual.idleSeed;
-    const attacking = visual.attackTimer > 0;
-    const casting = visual.castTimer > 0;
-    const attackProgress = attacking ? 1 - visual.attackTimer / ATTACK_TIME : 0;
-    const castProgress = casting ? 1 - visual.castTimer / CAST_TIME : 0;
-    const swing = attacking ? Math.sin(attackProgress * Math.PI) : 0;
-    const cast = casting ? Math.sin(castProgress * Math.PI) : 0;
-    const bob = Math.sin(t * 2.4) * 0.018 + Math.sin(t * 4.1) * 0.006;
+    const frame = computeAnimationFrame(animation, visual.attackTimer, visual.castTimer);
+    const swing = frame.swing;
+    const cast = frame.cast;
+    const wingCasting = cast > 0;
+    const bob =
+      Math.sin(t * animation.idleBobSpeed) * animation.idleBobAmount +
+      Math.sin(t * animation.idleBobSpeed * 1.7) * animation.idleBobAmount * 0.33;
     let forward = 0;
-    if (swing > 0) forward = model.attackStyle === 'ranged' ? -swing * 0.07 : swing * 0.12;
+    if (swing > 0) {
+      if (model.attackStyle === 'ranged') forward = -swing * animation.lunge * 0.58;
+      else if (model.attackStyle === 'magic') forward = swing * animation.lunge * 0.33;
+      else forward = swing * animation.lunge;
+    }
     if (cast > 0) forward += cast * 0.04;
 
     model.body.position.set(0, model.hover + bob, forward);
-    model.body.rotation.x = -cast * 0.1 + (model.attackStyle === 'beast' ? swing * 0.08 : 0);
-    model.body.rotation.z = Math.sin(t * 1.7) * 0.018 + (model.attackStyle === 'melee' ? swing * 0.07 : 0);
-    model.body.scaling.setAll(model.gradeScale * (1 + cast * 0.05 + swing * 0.018));
+    model.body.rotation.x = -cast * animation.bodyPitch + (model.attackStyle === 'beast' ? swing * animation.beastPitch : 0);
+    model.body.rotation.z =
+      Math.sin(t * animation.idleSwaySpeed) * animation.idleSwayAmount +
+      (model.attackStyle === 'melee' ? swing * animation.meleeRoll : 0);
+    model.body.scaling.setAll(model.gradeScale * (1 + cast * animation.castScale + swing * animation.swingScale));
 
     if (model.weapon) {
       let wx = model.weaponBase.x;
       let wz = model.weaponBase.z;
       if (swing > 0) {
         if (model.attackStyle === 'melee') {
-          wx += swing * 0.35;
-          wz += swing * 1.7;
+          wx += swing * 0.35 * animation.weaponPower;
+          wz += swing * 1.7 * animation.weaponPower;
         } else if (model.attackStyle === 'ranged') {
-          wx -= swing * 0.3;
+          wx -= swing * 0.3 * animation.weaponPower;
         } else if (model.attackStyle === 'magic') {
-          wx -= swing * 0.45;
-          wz += swing * 0.35;
+          wx -= swing * 0.45 * animation.weaponPower;
+          wz += swing * 0.35 * animation.weaponPower;
         } else {
-          wx += swing * 0.2;
+          wx += swing * 0.2 * animation.weaponPower;
         }
       }
       if (cast > 0) {
-        wx -= cast * 0.95;
-        wz += cast * 0.25;
+        wx -= cast * animation.castWeapon;
+        wz += cast * animation.castWeapon * 0.26;
       }
       model.weapon.rotation.x = wx;
       model.weapon.rotation.z = wz;
@@ -2789,8 +1801,8 @@ export class ArenaScene {
       let ox = model.offhandBase.x;
       let oz = model.offhandBase.z;
       if (swing > 0) {
-        ox += swing * 0.3;
-        oz -= swing * 1.5;
+        ox += swing * 0.3 * animation.offhandPower;
+        oz -= swing * 1.5 * animation.offhandPower;
       }
       if (cast > 0) {
         ox -= cast * 0.7;
@@ -2802,19 +1814,25 @@ export class ArenaScene {
 
     if (model.head) {
       let hx = model.headBase.x;
-      if (model.attackStyle === 'beast' && swing > 0) hx += swing * 0.45;
-      if (cast > 0) hx += cast * 0.25;
+      if (model.attackStyle === 'beast' && swing > 0) hx += swing * 0.45 * animation.headPower;
+      if (cast > 0) hx += cast * 0.25 * animation.headPower;
       model.head.rotation.x = hx;
     }
 
-    const flap = Math.sin(t * (casting ? 15 : 5)) * (casting ? 0.42 : 0.14);
+    const flap =
+      Math.sin(t * (wingCasting ? animation.wingSpeed * 3 : animation.wingSpeed)) *
+      (wingCasting ? animation.wingCastFlap : animation.wingFlap);
     for (const wing of model.wings) {
       wing.node.rotation.z = wing.baseZ + wing.sign * (flap + 0.06);
-      wing.node.rotation.y = wing.sign * (casting ? cast * 0.3 : Math.sin(t * 3) * 0.04);
+      wing.node.rotation.y = wing.sign * (wingCasting ? cast * 0.3 : Math.sin(t * 3) * 0.04);
     }
 
     if (model.glow) {
-      const pulse = 1 + Math.sin(t * 5.5) * 0.12 + cast * 0.85 + swing * 0.25;
+      const pulse =
+        1 +
+        Math.sin(t * animation.glowPulseSpeed) * animation.glowPulse +
+        cast * animation.glowCast +
+        swing * 0.25;
       model.glow.scaling.setAll(model.glowBase * pulse);
       model.glow.visibility = Math.min(1, 0.16 + cast * 0.5 + Math.abs(Math.sin(t * 6)) * 0.06);
     }

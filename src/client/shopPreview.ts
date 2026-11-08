@@ -9,12 +9,14 @@ import { Viewport } from '@babylonjs/core/Maths/math.viewport';
 import { Scene } from '@babylonjs/core/scene';
 import { getUnitDef } from '../shared/content';
 import { createUnitModel, type UnitModel } from './unitModels';
+import { getTunedModelOptions, getTunedModelYaw } from './tuningRuntime';
 
 interface PreviewSlot {
   defId: string;
   star: number;
   model: UnitModel;
   camera: ArcRotateCamera;
+  yaw: number;
 }
 
 export interface PreviewOptions {
@@ -107,6 +109,7 @@ export class ShopPreview {
       def,
       `shop-preview-${defId}-${star}-${this.seq++}`,
       star,
+      getTunedModelOptions(defId),
     );
 
     const mask = 1 << index;
@@ -129,7 +132,7 @@ export class ShopPreview {
     camera.minZ = 0.05;
     camera.maxZ = 30;
 
-    return { defId, star, model, camera };
+    return { defId, star, model, camera, yaw: getTunedModelYaw(defId) };
   }
 
   private measure(model: UnitModel): { center: Vector3; height: number } {
@@ -212,7 +215,7 @@ export class ShopPreview {
       const slot = this.slots[index];
       if (!slot) continue;
       const phase = this.time * 1.5 + index * 1.7;
-      slot.model.body.rotation.y = Math.sin(this.time * 0.55 + index * 0.9) * 0.2;
+      slot.model.body.rotation.y = slot.yaw + Math.sin(this.time * 0.55 + index * 0.9) * 0.2;
       slot.model.body.position.y = slot.model.hover + Math.sin(phase) * 0.02;
     }
   }
