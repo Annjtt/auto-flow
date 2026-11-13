@@ -195,7 +195,7 @@ export class RoomManager {
         this.joinLobby(session, message.code);
         return;
       case 'quick_play':
-        this.quickPlay(session);
+        this.quickPlay(session, message);
         return;
       case 'leave_lobby':
         this.leaveLobby(session);
@@ -304,20 +304,24 @@ export class RoomManager {
     this.broadcastLobbyList();
   }
 
-  private quickPlay(session: Session): void {
+  private quickPlay(session: Session, message: Extract<ClientMessage, { type: 'quick_play' }>): void {
     if (session.roomCode) return this.error(session, 'Сначала покиньте текущее лобби.');
     const code = this.newCode();
+    const tower = message.preset === 'tower';
+    const maxPlayers = clamp(message.maxPlayers, 2, 8, tower ? 8 : 6);
     const settings = sanitizeSettings({
       ...DEFAULT_SETTINGS,
-      maxPlayers: 6,
+      maxPlayers,
       aiFill: true,
       privateLobby: true,
-      prepSeconds: 30,
-      startingLives: 30,
+      prepSeconds: tower ? 24 : 30,
+      startingLives: tower ? 10 : 30,
+      startingGold: tower ? 8 : DEFAULT_SETTINGS.startingGold,
+      maxRounds: tower ? 15 : 24,
     });
     const room: Room = {
       code,
-      name: `Быстрый бой ${code}`,
+      name: tower ? `Башня ${code}` : `Быстрый бой ${code}`,
       hostId: session.id,
       settings,
       seats: [

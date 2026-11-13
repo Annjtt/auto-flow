@@ -212,7 +212,7 @@ export type ClientMessage =
   | { type: 'list_lobbies' }
   | { type: 'create_lobby'; name: string; settings: Partial<LobbySettings> }
   | { type: 'join_lobby'; code: string }
-  | { type: 'quick_play' }
+  | { type: 'quick_play'; maxPlayers?: number; preset?: 'tower' }
   | { type: 'leave_lobby' }
   | { type: 'ready'; ready: boolean }
   | { type: 'start_game' }

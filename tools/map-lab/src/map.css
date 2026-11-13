@@ -927,3 +927,28 @@ select:disabled {
     min-height: 520px;
   }
 }
+
+.env-surface-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.env-surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.env-surface-head b {
+  font-size: 13px;
+}
+
+.env-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

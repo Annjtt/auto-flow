@@ -11,174 +11,272 @@
     <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/img/win.png" as="image" />
     <link rel="preload" href="/img/loss.png" as="image" />
-    <script type="module" crossorigin src="/assets/game-hLhCXBGd.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/meshBuilder-Cav3HIRh.js">
-    <link rel="modulepreload" crossorigin href="/assets/unitModels-CsMJBSc5.js">
-    <link rel="modulepreload" crossorigin href="/assets/mapObjects-CS4dGW8_.js">
-    <link rel="stylesheet" crossorigin href="/assets/meshBuilder-BOE9TPTr.css">
-    <link rel="stylesheet" crossorigin href="/assets/game-BloV_kwt.css">
+    <script type="module" crossorigin src="/assets/game-7BoDNnas.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/pointLight-D2Fj0olA.js">
+    <link rel="modulepreload" crossorigin href="/assets/unitModels-DQ8hUcfB.js">
+    <link rel="modulepreload" crossorigin href="/assets/mapObjects-Dgw3Y7C3.js">
+    <link rel="stylesheet" crossorigin href="/assets/pointLight-BOE9TPTr.css">
+    <link rel="stylesheet" crossorigin href="/assets/game-XpOjmv01.css">
   </head>
   <body data-map="jaddy" data-body-font="onest">
     <div id="app">
+      <input id="playerName" type="hidden" maxlength="18" autocomplete="nickname" />
       <div class="ambient-glow ambient-a"></div>
       <div class="ambient-glow ambient-b"></div>
       <div id="connection" class="connection-badge">Соединение...</div>
 
-      <section id="menu-screen" class="screen active">
-        <div class="menu-atmosphere" aria-hidden="true">
-          <span class="orbit orbit-a"></span>
-          <span class="orbit orbit-b"></span>
-          <span class="sigil sigil-a"></span>
-          <span class="sigil sigil-b"></span>
+      <section id="auth-screen" class="screen active">
+        <div class="auth-backdrop" aria-hidden="true">
+          <span class="auth-grid"></span>
+          <span class="auth-flare"></span>
         </div>
-
-        <header class="menu-head">
-          <div class="brand">
-            <div class="brand-mark">
-              <span class="brand-rune"></span>
-              <span>AUTO<span>FLOW</span></span>
-            </div>
-            <div class="brand-sub">Тактические автошахматы · онлайн-арена</div>
+        <div class="auth-shell">
+          <div class="auth-brand">
+            <span class="brand-rune" aria-hidden="true"></span>
+            <span class="auth-wordmark">AUTO<span>FLOW</span></span>
           </div>
-          <div class="menu-head-meta">
-            <span class="season-chip"><i></i>Сезон I</span>
-            <span class="menu-version">версия 0.1.0</span>
+          <div class="auth-card panel">
+            <div class="auth-tabs">
+              <button class="auth-tab active" data-auth-mode="login" type="button">Вход</button>
+              <button class="auth-tab" data-auth-mode="register" type="button">Регистрация</button>
+            </div>
+            <form id="authForm" class="auth-form">
+              <div id="authAvatarGrid" class="auth-avatar-grid" aria-label="Выбор аватара"></div>
+              <label class="auth-field">
+                <span>Позывной</span>
+                <input id="authNameInput" maxlength="18" autocomplete="nickname" placeholder="Странник" />
+              </label>
+              <p id="authMessage" class="auth-message" role="status"></p>
+              <button id="authSubmit" class="btn btn-primary auth-submit" type="submit">Войти</button>
+            </form>
+            <button id="authContinue" class="btn auth-continue hidden" type="button">Продолжить</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="menu-screen" class="screen">
+        <canvas id="menuCanvas" class="menu-canvas" touch-action="none"></canvas>
+        <div class="menu-darken" aria-hidden="true"></div>
+        <div class="menu-scanlines" aria-hidden="true"></div>
+
+        <header class="menu-hud-top">
+          <button id="menuProfileBtn" class="profile-block" type="button" aria-label="Профиль и настройки" title="Профиль и настройки">
+            <span class="profile-avatar" aria-hidden="true">
+              <span id="menuAvatarGlyph" class="avatar-glyph">♞</span>
+              <span class="profile-gear" aria-hidden="true"><span class="orb-glyph gear"></span></span>
+              <span id="menuLevelValue" class="profile-level">1</span>
+            </span>
+            <span class="profile-xp" aria-hidden="true"><i id="menuXpFill"></i></span>
+          </button>
+          <div class="menu-brand-icon" aria-hidden="true"><span class="brand-rune"></span></div>
+          <div class="menu-wallet" aria-label="Игровая валюта">
+            <span class="wallet-item" title="Золото"><span class="wallet-icon coin" aria-hidden="true"></span><b>0</b></span>
+            <span class="wallet-item" title="Кристаллы"><span class="wallet-icon gem" aria-hidden="true"></span><b>0</b></span>
+            <span class="wallet-item" title="Сезон"><span class="wallet-icon season" aria-hidden="true"></span><b>I</b></span>
           </div>
         </header>
 
-        <div class="menu-shell">
-          <aside class="menu-rail">
-            <div class="profile-card panel">
-              <div class="profile-crest" aria-hidden="true"><span></span></div>
-              <div class="profile-field">
-                <label for="playerName">Ваше имя</label>
-                <input id="playerName" maxlength="18" autocomplete="nickname" placeholder="Странник" />
-              </div>
-              <div class="profile-stats">
-                <div><b>6</b><span>рас</span></div>
-                <div><b>24</b><span>бойца</span></div>
-                <div><b>8</b><span>игроков</span></div>
-              </div>
-              <button id="quickPlay" class="menu-action primary" type="button">
-                <span class="menu-action-icon swords" aria-hidden="true"></span>
-                <span class="menu-action-copy"><b>Быстрый бой</b><small>Соло против ИИ</small></span>
-              </button>
-              <button id="openCreate" class="menu-action" type="button">
-                <span class="menu-action-icon banner" aria-hidden="true"></span>
-                <span class="menu-action-copy"><b>Создать лобби</b><small>Свои правила и код</small></span>
-              </button>
-            </div>
+        <div class="menu-center">
+          <div class="menu-actions menu-actions-left">
+            <button id="menuModesBtn" class="menu-orb menu-action-orb" type="button" aria-label="Режимы игры" title="Режимы игры">
+              <span class="orb-glyph modes" aria-hidden="true"></span>
+            </button>
+            <button id="menuNetworkBtn" class="menu-orb menu-action-orb" type="button" aria-label="Сетевая игра" title="Сетевая игра">
+              <span class="orb-glyph network" aria-hidden="true"></span>
+            </button>
+          </div>
 
-            <div class="join-card panel">
-              <div class="rail-heading"><span>Войти в зал</span><i></i></div>
-              <div class="join-row">
-                <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
-                <button id="joinBtn" class="btn btn-primary" type="button">Войти</button>
-              </div>
-              <p class="rail-note">Пятизначный код от зала</p>
-            </div>
+          <div class="play-cluster">
+            <span class="play-ring ring-a" aria-hidden="true"></span>
+            <span class="play-ring ring-b" aria-hidden="true"></span>
+            <button id="quickPlay" class="play-orb" type="button" aria-label="Быстрый бой" title="Быстрый бой">
+              <span class="orb-glyph swords" aria-hidden="true"></span>
+            </button>
+          </div>
 
-            <div class="rail-tip">
-              <span class="tip-icon">i</span>
-              <p>Перетаскивайте бойцов по полю — светящаяся нить покажет маршрут прыжка.</p>
-            </div>
-          </aside>
-
-          <main class="menu-main">
-            <section class="menu-hero">
-              <span class="eyebrow">Автошахматы · мультиплеер · ИИ</span>
-              <h1>Собери армию<br /><em>Достойную победы</em></h1>
-              <p class="hero-copy">
-                Покупайте бойцов, открывайте синергии рас и классов, повышайте звёзды
-                и выставляйте армию. Бойцы сражаются сами — побеждает стратегия.
-              </p>
-              <div class="hero-runes" aria-hidden="true">
-                <span></span><span></span><span></span>
-              </div>
-            </section>
-
-            <section class="map-select">
-              <header class="section-head">
-                <div>
-                  <span class="section-kicker">Select chessboard</span>
-                  <h2>Выберите доску</h2>
-                </div>
-                <span class="section-note">4 тематических арены · влияет только на поле боя</span>
-              </header>
-              <div id="mapGrid" class="map-grid"></div>
-            </section>
-
-            <section class="lobbies-panel">
-              <header class="section-head">
-                <div>
-                  <span class="section-kicker">Открытые залы</span>
-                  <h2>Публичные лобби</h2>
-                </div>
-                <button id="refreshLobbies" class="text-button" type="button">Обновить</button>
-              </header>
-              <div id="lobbyList" class="lobby-list">
-                <div class="empty-state">Пока нет открытых лобби.<br />Создайте своё!</div>
-              </div>
-            </section>
-          </main>
+          <div class="menu-actions menu-actions-right">
+            <button id="menuShopBtn" class="menu-orb menu-action-orb" type="button" aria-label="Магазин" title="Магазин">
+              <span class="orb-glyph shop" aria-hidden="true"></span>
+              <span class="menu-soon" aria-hidden="true"></span>
+            </button>
+            <button id="menuInventoryBtn" class="menu-orb menu-action-orb" type="button" aria-label="Инвентарь" title="Инвентарь">
+              <span class="orb-glyph inventory" aria-hidden="true"></span>
+              <span class="menu-soon" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
 
-        <footer class="menu-footer">
-          <span>Auto Flow · автошахматы · серверная симуляция боя · <a class="text-button" href="/tools/unit-lab/" target="_blank" rel="noreferrer" title="Инструмент настройки юнитов">Unit Lab ↗</a></span>
-          <span>Нажмите на бойца, затем на клетку — или перетащите его на поле.</span>
+        <footer class="menu-hud-bottom">
+          <button class="map-orb" data-open-screen="map" type="button" aria-label="Активная карта" title="Активная карта">
+            <span class="map-orb-art" aria-hidden="true"></span>
+          </button>
         </footer>
       </section>
 
+      <section id="play-screen" class="screen">
+        <div class="screen-frame">
+          <header class="icon-bar">
+            <button class="menu-orb small" data-open-screen="menu" type="button" aria-label="Назад" title="Назад">
+              <span class="orb-glyph back" aria-hidden="true"></span>
+            </button>
+            <div class="icon-bar-title">Залы</div>
+            <button id="refreshLobbies" class="menu-orb small" type="button" aria-label="Обновить" title="Обновить">
+              <span class="orb-glyph refresh" aria-hidden="true"></span>
+            </button>
+          </header>
+
+          <div class="browser-layout">
+            <aside class="browser-side panel">
+              <div class="join-card">
+                <div class="join-row">
+                  <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
+                  <button id="joinBtn" class="btn btn-primary" type="button">Войти</button>
+                </div>
+              </div>
+              <button class="btn browser-create" data-open-screen="create" type="button">Создать лобби</button>
+              <div class="browser-profile">
+                <span id="playAvatarGlyph" class="avatar-glyph" aria-hidden="true">♞</span>
+                <div>
+                  <b id="playNameLabel">Странник</b>
+                  <small id="playMapName">Jaddy Forest</small>
+                </div>
+              </div>
+            </aside>
+            <div id="lobbyList" class="lobby-list panel">
+              <div class="empty-state">Пока нет открытых лобби.<br />Создайте своё!</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="map-screen" class="screen">
+        <div class="screen-frame">
+          <header class="icon-bar">
+            <button class="menu-orb small" data-open-screen="menu" type="button" aria-label="Назад" title="Назад">
+              <span class="orb-glyph back" aria-hidden="true"></span>
+            </button>
+            <div class="icon-bar-title">Карты</div>
+            <div class="icon-bar-meta"><span id="mapCurrentName">Jaddy Forest</span></div>
+          </header>
+          <div id="mapGrid" class="map-grid"></div>
+        </div>
+      </section>
+
+      <section id="create-screen" class="screen">
+        <div class="screen-frame">
+          <header class="icon-bar">
+            <button class="menu-orb small" data-open-screen="menu" type="button" aria-label="Назад" title="Назад">
+              <span class="orb-glyph back" aria-hidden="true"></span>
+            </button>
+            <div class="icon-bar-title">Создать лобби</div>
+            <span></span>
+          </header>
+
+          <form id="createForm" class="create-form panel">
+            <div class="form-grid">
+              <label class="form-field full">
+                <span>Название зала</span>
+                <input name="roomName" maxlength="30" value="Арена" />
+              </label>
+              <label class="form-field">
+                <span>Максимум игроков</span>
+                <select name="maxPlayers">
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8" selected>8</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Стартовое золото</span>
+                <input name="startingGold" type="number" min="0" max="20" value="6" />
+              </label>
+              <label class="form-field">
+                <span>Стартовый уровень</span>
+                <select name="startingLevel">
+                  <option value="1">1</option>
+                  <option value="2" selected>2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                </select>
+              </label>
+              <label class="form-field">
+                <span>Жизни</span>
+                <input name="startingLives" type="number" min="5" max="60" value="30" />
+              </label>
+              <label class="form-field">
+                <span>Подготовка, сек</span>
+                <input name="prepSeconds" type="number" min="10" max="90" value="32" />
+              </label>
+              <label class="form-field">
+                <span>Максимум раундов</span>
+                <input name="maxRounds" type="number" min="5" max="40" value="24" />
+              </label>
+              <div class="check-row full">
+                <label class="check-field"><input type="checkbox" name="aiFill" checked /> Добивать места ботами</label>
+                <label class="check-field"><input type="checkbox" name="privateLobby" /> Приватное лобби</label>
+              </div>
+            </div>
+            <div class="modal-actions">
+              <button class="btn" type="button" data-open-screen="menu">Отмена</button>
+              <button class="btn btn-primary" type="submit">Создать зал</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
       <section id="lobby-screen" class="screen">
-        <header class="lobby-top">
-          <button id="leaveLobbyTop" class="text-button back-link" type="button">← В меню</button>
-          <div class="lobby-title">
-            <div class="eyebrow">Лобби</div>
-            <h1 id="roomName">Зал арены</h1>
+        <div class="screen-frame lobby-frame">
+          <header class="icon-bar">
+            <button id="leaveLobbyTop" class="menu-orb small" type="button" aria-label="Выйти" title="Выйти">
+              <span class="orb-glyph back" aria-hidden="true"></span>
+            </button>
+            <div class="lobby-title">
+              <div class="eyebrow">Лобби</div>
+              <h1 id="roomName">Зал арены</h1>
+            </div>
+            <div class="room-pill">
+              <span>КОД</span>
+              <strong id="roomCode">-----</strong>
+              <button id="copyCode" class="menu-orb tiny" type="button" aria-label="Копировать код" title="Копировать код">
+                <span class="orb-glyph copy" aria-hidden="true"></span>
+              </button>
+            </div>
+          </header>
+
+          <div class="lobby-grid">
+            <aside class="lobby-map-panel panel">
+              <div class="lobby-board-preview" id="lobbyBoardPreview" data-map="jaddy">
+                <span class="lobby-board-label">Ваша доска</span>
+                <b id="lobbyBoardName">Jaddy Forest</b>
+              </div>
+              <button class="btn" data-open-screen="map" type="button">Сменить карту</button>
+            </aside>
+
+            <section class="lobby-main panel">
+              <div class="card-heading">
+                <h2>Участники</h2>
+                <span id="lobbyCount" class="muted"></span>
+              </div>
+              <div id="lobbyPlayers" class="player-slots"></div>
+              <div class="lobby-actions">
+                <button id="readyBtn" class="btn" type="button">Готов</button>
+                <button id="startBtn" class="btn btn-primary" type="button">Начать матч</button>
+              </div>
+              <p id="lobbyHint" class="lobby-hint"></p>
+            </section>
+
+            <aside class="lobby-rules panel">
+              <div class="card-heading"><h2>Правила</h2></div>
+              <div id="lobbySettings" class="settings-grid"></div>
+            </aside>
           </div>
-          <div class="room-code-box">
-            <span>Код зала</span>
-            <strong id="roomCode">-----</strong>
-            <button id="copyCode" class="text-button" type="button">Копировать</button>
-          </div>
-        </header>
-
-        <div class="lobby-layout">
-          <div class="lobby-main panel">
-            <div class="card-heading">
-              <h2>Участники</h2>
-              <span id="lobbyCount" class="muted"></span>
-            </div>
-            <div id="lobbyPlayers" class="player-slots"></div>
-
-            <div class="card-heading settings-heading">
-              <h2>Правила матча</h2>
-            </div>
-            <div id="lobbySettings" class="settings-grid"></div>
-
-            <div class="lobby-actions">
-              <button id="readyBtn" class="btn" type="button">Готов</button>
-              <button id="startBtn" class="btn btn-primary" type="button">Начать матч</button>
-            </div>
-            <p id="lobbyHint" class="lobby-hint"></p>
-          </div>
-
-          <aside class="lobby-side panel">
-            <div class="lobby-board-preview" id="lobbyBoardPreview" data-map="jaddy">
-              <span class="lobby-board-label">Ваша доска</span>
-              <b id="lobbyBoardName">Jaddy Forest</b>
-            </div>
-            <h2>Как играть</h2>
-            <ol class="how-list">
-              <li><b>Покупайте</b> бойцов в магазине. Три копии одного бойца сливаются в звёздное улучшение.</li>
-              <li><b>Собирайте</b> синергии рас и классов. Они усиливают весь отряд.</li>
-              <li><b>Выставляйте</b> бойцов на свою половину поля и повышайте уровень ради новых слотов.</li>
-              <li><b>Смотрите бой.</b> Бойцы действуют автоматически, способности срабатывают при полной мане.</li>
-            </ol>
-            <div class="lobby-aside-note">
-              Проигравший теряет жизни. Последний оставшийся игрок забирает арену.
-            </div>
-          </aside>
         </div>
       </section>
 
@@ -199,10 +297,6 @@
                   <span class="phase-dot"></span>
                   <span id="hudPhaseLabel">подготовка</span>
                   <b id="hudTimer">32</b>
-                </div>
-                <div class="chud-tools">
-                  <button id="rulesBtn" class="icon-btn chud-tool" type="button" title="Правила" aria-label="Правила">?</button>
-                  <button id="surrenderBtn" class="icon-btn chud-tool danger" type="button" title="Сдаться" aria-label="Сдаться">✕</button>
                 </div>
               </div>
 
@@ -249,6 +343,11 @@
               </div>
 
               <div id="hudOpponent" class="opponent-line">Соперник определится в бою</div>
+
+              <div class="chud-tools">
+                <button id="rulesBtn" class="icon-btn chud-tool" type="button" title="Правила" aria-label="Правила">?</button>
+                <button id="surrenderBtn" class="icon-btn chud-tool danger" type="button" title="Сдаться" aria-label="Сдаться">✕</button>
+              </div>
             </section>
           </header>
 

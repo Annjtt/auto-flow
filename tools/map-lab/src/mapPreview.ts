@@ -24,9 +24,12 @@ import { Scene } from '@babylonjs/core/scene';
 import {
   MAP_SHAPES,
   createMapObject,
+  emptyMapEnv,
+  envSky,
   themeForDoc,
-  type BuiltinMapId,
+  type MapBase,
   type MapDoc,
+  type MapEnv,
   type MapObject,
   type MapShape,
   type MapTheme,
@@ -71,7 +74,13 @@ export class MapPreview {
   private readonly gizmos: GizmoManager;
   private stage: MapStage | null = null;
   private stageRoot: TransformNode | null = null;
-  private stageBase: BuiltinMapId | null = null;
+  private stageBase: MapBase | null = null;
+  private stageEnvSignature = '';
+  private env: MapEnv = emptyMapEnv();
+  private lastIsland = false;
+  private currentBase: MapBase = 'none';
+  private framed = false;
+  private picker: Mesh | null = null;
   private readonly stageMaterials = new Map<string, StandardMaterial>();
   private visuals = new Map<string, ObjectVisual>();
   private objects: MapObject[] = [];
@@ -116,8 +125,7 @@ export class MapPreview {
     this.glowLayer = new GlowLayer('map-glow', this.scene);
     this.glowLayer.intensity = 0.4;
 
-    this.buildStage('jaddy');
-    this.buildPicker();
+    this.buildStage('none', emptyMapEnv());
 
     this.selectionLayer = new HighlightLayer('map-selection', this.scene);
     this.selectionLayer.innerGlow = false;
@@ -154,10 +162,11 @@ export class MapPreview {
 
   setTheme(theme: MapTheme): void {
     this.theme = theme;
-    const sky = Color3.FromHexString(theme.sky);
+    const backdrop = envSky(theme, this.env);
+    const sky = Color3.FromHexString(backdrop.sky);
     this.scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
-    this.scene.fogColor = Color3.FromHexString(theme.fog);
-    this.scene.fogDensity = theme.fogDensity;
+    this.scene.fogColor = Color3.FromHexString(backdrop.fog);
+    this.scene.fogDensity = backdrop.fogDensity;
     this.hemi.diffuse = Color3.FromHexString(theme.hemiDiffuse);
     this.hemi.groundColor = Color3.FromHexString(theme.hemiGround);
     this.hemi.intensity = theme.hemiIntensity;
@@ -172,11 +181,20 @@ export class MapPreview {
   }
 
   setDoc(doc: MapDoc): void {
-    if (this.stageBase !== doc.base) this.buildStage(doc.base);
+    const baseChanged = this.stageBase !== doc.base;
+    const envChanged = this.envSignature(doc.env) !== this.stageEnvSignature;
+    const islandChanged = this.lastIsland !== doc.env.island.enabled;
+    this.lastIsland = doc.env.island.enabled;
+    if (baseChanged || envChanged) this.buildStage(doc.base, doc.env);
+    this.env = doc.env;
     this.setTheme(themeForDoc(doc));
     this.objects = doc.objects;
     this.syncObjects();
     this.setSelection(doc.objects.some((object) => object.id === this.selectedId) ? this.selectedId : null);
+    if (!this.framed || baseChanged || islandChanged) {
+      this.framed = true;
+      this.frameBase(doc.base);
+    }
   }
 
   setObjects(objects: MapObject[]): void {
@@ -247,10 +265,25 @@ export class MapPreview {
   }
 
   focusBoard(): void {
-    this.camera.setTarget(new Vector3(0, -0.35, 0.6));
-    this.camera.radius = 30;
+    this.frameBase(this.currentBase);
+  }
+
+  /**
+   * Frames the camera for the current base: the empty board needs a much
+   * tighter shot than a full island with scenery around the table.
+   */
+  private frameBase(base: MapBase): void {
+    if (base === 'none') {
+      const wide = this.env.island.enabled;
+      this.camera.setTarget(new Vector3(0, -0.55, 0.3));
+      this.camera.radius = wide ? Math.max(24, this.env.island.radius * 1.6) : 16;
+      this.camera.beta = wide ? 0.86 : 0.92;
+    } else {
+      this.camera.setTarget(new Vector3(0, -0.35, 0.6));
+      this.camera.radius = 30;
+      this.camera.beta = 0.9;
+    }
     this.camera.alpha = Math.PI / 2;
-    this.camera.beta = 0.9;
   }
 
   resize(): void {
@@ -261,28 +294,45 @@ export class MapPreview {
     return this.selectedId ? (this.visuals.get(this.selectedId)?.mesh ?? null) : null;
   }
 
-  private buildStage(base: BuiltinMapId): void {
+  private envSignature(env: MapEnv): string {
+    return JSON.stringify(env);
+  }
+
+  private buildStage(base: MapBase, env: MapEnv): void {
     this.stageRoot?.dispose(false, false);
     this.stageRoot = null;
+    this.picker?.dispose(false, false);
+    this.picker = null;
     for (const material of this.stageMaterials.values()) material.dispose();
     this.stageMaterials.clear();
 
     const root = new TransformNode('map-stage-root', this.scene);
     this.stageRoot = root;
     this.stageBase = base;
-    this.stage = new MapStage(this.scene, this.stageMaterials, { base, interactive: true, root });
+    this.currentBase = base;
+    this.env = env;
+    this.stageEnvSignature = this.envSignature(env);
+    this.stage = new MapStage(this.scene, this.stageMaterials, { base, env, interactive: true, root });
     this.stage.build();
     if (this.theme) this.stage.applyTheme(this.theme);
+    this.buildPicker(base);
   }
 
-  private buildPicker(): void {
-    // Invisible ground at island level so decorations can be placed off-board;
-    // the real board tiles sit above it and win the pick on the arena.
-    const picker = MeshBuilder.CreateGround('map-picker', { width: 30, height: 30, subdivisions: 1 }, this.scene);
-    picker.position.y = GROUND_Y + 0.02;
+  private buildPicker(base: MapBase): void {
+    // Invisible surface used for placement and deselection. With scenery it
+    // sits at island level so decorations can be placed around the table; on
+    // the empty base it sits on the war table itself so nothing floats.
+    const empty = base === 'none';
+    const picker = MeshBuilder.CreateGround(
+      'map-picker',
+      { width: empty ? 10.7 : 30, height: empty ? 10.7 : 30, subdivisions: 1 },
+      this.scene,
+    );
+    picker.position.y = empty ? -0.3 : GROUND_Y + 0.02;
     picker.visibility = 0;
     picker.isPickable = true;
     picker.metadata = { kind: 'editor-ground' };
+    this.picker = picker;
   }
 
   private syncObjects(): void {
@@ -380,8 +430,14 @@ export class MapPreview {
       if (id !== this.selectedId) this.callbacks.onSelect(id);
       return;
     }
-    // Board tiles and the invisible island picker deselect the current object.
-    if (mesh?.metadata?.kind === 'editor-ground' || mesh?.metadata?.kind === 'cell') this.callbacks.onSelect(null);
+    // Board tiles, extra surfaces and the invisible island picker deselect the current object.
+    if (
+      mesh?.metadata?.kind === 'editor-ground' ||
+      mesh?.metadata?.kind === 'env-surface' ||
+      mesh?.metadata?.kind === 'cell'
+    ) {
+      this.callbacks.onSelect(null);
+    }
   }
 
   private transformSignature(mesh: Mesh): string {

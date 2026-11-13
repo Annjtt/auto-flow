@@ -6,7 +6,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Scene } from '@babylonjs/core/scene';
-import type { BuiltinMapId, MapTheme } from '../shared/maps';
+import { emptyMapEnv, type MapBase, type MapEnv, type MapTheme } from '../shared/maps';
 
 /** Height of the island surface below the floating war table. */
 export const GROUND_Y = -1.15;
@@ -25,9 +25,27 @@ export interface StageMote {
   speed: number;
 }
 
+export interface StageEnvStar {
+  mesh: Mesh;
+  phase: number;
+  baseScale: number;
+}
+
+export interface StageEnvParticle {
+  mesh: Mesh;
+  baseX: number;
+  baseZ: number;
+  phase: number;
+  speed: number;
+  rise: boolean;
+  sway: number;
+}
+
 export interface MapStageOptions {
-  /** Built-in biome used for the procedural island and its decorations. */
-  base: BuiltinMapId;
+  /** Built-in biome used for the procedural island, or 'none' for a clean board. */
+  base: MapBase;
+  /** Composable environment parts added on top of the base. */
+  env?: MapEnv;
   /** Board tiles receive cell metadata and remain pickable. */
   interactive?: boolean;
   /** Optional node that receives every built mesh/light, for easy rebuilding. */
@@ -44,17 +62,21 @@ export class MapStage {
   tiles: Mesh[] = [];
   flames: StageFlame[] = [];
   motes: StageMote[] = [];
+  envStars: StageEnvStar[] = [];
+  envParticles: StageEnvParticle[] = [];
   shoreFoamMat: StandardMaterial | null = null;
 
   private readonly scene: Scene;
-  private readonly base: BuiltinMapId;
+  private readonly base: MapBase;
   private readonly interactive: boolean;
   private readonly root: TransformNode | null;
+  private readonly env: MapEnv;
 
   constructor(scene: Scene, materials: Map<string, StandardMaterial>, options: MapStageOptions) {
     this.scene = scene;
     this.materials = materials;
     this.base = options.base;
+    this.env = options.env ?? emptyMapEnv();
     this.interactive = options.interactive !== false;
     this.root = options.root ?? null;
   }
@@ -64,7 +86,9 @@ export class MapStage {
     const lightsBefore = new Set(this.scene.lights);
     const nodesBefore = new Set(this.scene.transformNodes);
     this.buildArena();
-    this.buildEnvironment();
+    // 'none' means a clean board: no island, rocks, trees or biome decoration.
+    if (this.base !== 'none') this.buildEnvironment();
+    this.buildEnvParts();
     if (!this.root) return;
     const root = this.root;
     // Attach only root-level nodes: children that already have a parent (for
@@ -441,6 +465,196 @@ export class MapStage {
     this.buildMapDecor();
   }
 
+
+  /**
+   * Builds the composable environment parts. Island and sea are only added on
+   * the clean base, where they don't collide with a biome's own scenery; extra
+   * surfaces, stars and particles are available on every base.
+   */
+  private buildEnvParts(): void {
+    if (this.base === 'none') {
+      if (this.env.island.enabled) this.buildEnvIsland();
+      if (this.env.sea.enabled) this.buildEnvSea();
+    }
+    this.buildEnvSurfaces();
+    if (this.env.stars.enabled) this.buildEnvStars();
+    if (this.env.particles.enabled) this.buildEnvParticles();
+  }
+
+  private buildEnvIsland(): void {
+    const island = this.env.island;
+    const radius = island.radius;
+    const depth = island.depth;
+    const side = this.material('envIslandSide', island.sideColor, '#000000');
+    const top = this.material('envIslandTop', island.topColor, '#000000');
+    const rim = this.material('envIslandRim', island.rimColor, '#000000');
+
+    const body = MeshBuilder.CreateCylinder(
+      'envIslandBody',
+      { height: depth, diameterTop: radius * 2, diameterBottom: radius * 1.5, tessellation: 40 },
+      this.scene,
+    );
+    body.position.y = GROUND_Y - depth / 2;
+    body.material = side;
+    body.isPickable = false;
+
+    const surface = MeshBuilder.CreateCylinder(
+      'envIslandSurface',
+      { height: 0.22, diameterTop: radius * 2 + 0.3, diameterBottom: radius * 2 + 0.3, tessellation: 56 },
+      this.scene,
+    );
+    surface.position.y = GROUND_Y - 0.11;
+    surface.material = top;
+    surface.isPickable = this.interactive;
+    surface.metadata = { kind: 'env-surface' };
+
+    const rimRing = MeshBuilder.CreateTorus(
+      'envIslandRim',
+      { diameter: radius * 2 + 0.1, thickness: Math.max(0.18, radius * 0.03), tessellation: 64 },
+      this.scene,
+    );
+    rimRing.position.y = GROUND_Y + 0.02;
+    rimRing.scaling.y = 0.18;
+    rimRing.material = rim;
+    rimRing.isPickable = false;
+
+    if (island.courtRadius > 0.2) {
+      const court = MeshBuilder.CreateCylinder(
+        'envIslandCourt',
+        { height: 0.16, diameter: island.courtRadius * 2, tessellation: 48 },
+        this.scene,
+      );
+      court.position.y = GROUND_Y + 0.03;
+      court.material = rim;
+      court.isPickable = this.interactive;
+      court.metadata = { kind: 'env-surface' };
+    }
+  }
+
+  private buildEnvSea(): void {
+    const sea = this.env.sea;
+    const water = this.material('envSeaWater', sea.color, sea.emissive);
+    water.specularColor = new Color3(0.18, 0.3, 0.34);
+    const plane = MeshBuilder.CreateGround(
+      'envSea',
+      { width: sea.size, height: sea.size, subdivisions: 1 },
+      this.scene,
+    );
+    plane.position.y = sea.level;
+    plane.material = water;
+    plane.isPickable = false;
+
+    if (!sea.foam) return;
+    const foam = this.material('envSeaFoam', sea.foamColor, sea.foamColor);
+    foam.disableLighting = true;
+    foam.diffuseColor = Color3.Black();
+    foam.specularColor = Color3.Black();
+    foam.alpha = 0.3;
+    foam.backFaceCulling = false;
+    const islandRadius = this.env.island.enabled ? this.env.island.radius : 17;
+    for (const [extra, fade] of [
+      [2.2, 1],
+      [5.4, 0.62],
+      [8.6, 0.34],
+    ] as [number, number][]) {
+      const ring = MeshBuilder.CreateTorus(
+        `envSeaFoam-${extra}`,
+        { diameter: islandRadius * 2 + extra, thickness: 0.16, tessellation: 72 },
+        this.scene,
+      );
+      ring.position.y = sea.level + 0.03;
+      ring.material = foam;
+      ring.visibility = fade;
+      ring.isPickable = false;
+    }
+  }
+
+  private buildEnvSurfaces(): void {
+    for (const [index, surface] of this.env.surfaces.entries()) {
+      const material = this.material(`envSurface-${surface.id || index}`, surface.color, surface.emissive);
+      material.alpha = surface.alpha;
+      material.backFaceCulling = surface.alpha >= 1;
+      const mesh =
+        surface.shape === 'box'
+          ? MeshBuilder.CreateBox(
+              `envSurface-${index}`,
+              { width: surface.size[0], height: surface.size[1], depth: surface.size[2] },
+              this.scene,
+            )
+          : MeshBuilder.CreateCylinder(
+              `envSurface-${index}`,
+              { height: surface.size[1], diameter: surface.size[0], tessellation: 48 },
+              this.scene,
+            );
+      mesh.position.set(surface.position[0], surface.position[1], surface.position[2]);
+      mesh.material = material;
+      mesh.metadata = { kind: 'env-surface', surfaceId: surface.id };
+      mesh.isPickable = this.interactive;
+    }
+  }
+
+  private buildEnvStars(): void {
+    const stars = this.env.stars;
+    const material = this.material('envStars', stars.color, stars.color);
+    material.disableLighting = true;
+    material.fogEnabled = false;
+    material.specularColor = Color3.Black();
+    material.emissiveColor = Color3.FromHexString(stars.color);
+    let seed = 5171;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let i = 0; i < stars.count; i++) {
+      const star = MeshBuilder.CreateSphere(
+        `envStar-${i}`,
+        { diameter: stars.size * (0.55 + rand() * 0.9), segments: 4 },
+        this.scene,
+      );
+      const depth = stars.distance * 0.33 + rand() * stars.distance * 0.4;
+      star.position.set(
+        (rand() - 0.5) * stars.distance * 1.2,
+        -4 + rand() * 5.5,
+        -depth,
+      );
+      star.material = material;
+      star.isPickable = false;
+      this.envStars.push({ mesh: star, phase: rand() * Math.PI * 2, baseScale: 1 });
+    }
+  }
+
+  private buildEnvParticles(): void {
+    const particles = this.env.particles;
+    const material = this.material('envParticles', particles.color, particles.color);
+    material.disableLighting = true;
+    material.specularColor = Color3.Black();
+    material.alpha = 0.9;
+    material.emissiveColor = Color3.FromHexString(particles.color);
+    const rise = particles.kind === 'embers' || particles.kind === 'sparks';
+    const drag = particles.kind === 'snow' ? 0.45 : 1;
+    let seed = 923;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return seed / 2147483647;
+    };
+    for (let i = 0; i < particles.count; i++) {
+      const diameter = particles.size * (0.6 + rand() * 0.8);
+      const mesh = MeshBuilder.CreateSphere(`envParticle-${i}`, { diameter, segments: 4 }, this.scene);
+      mesh.material = material;
+      mesh.isPickable = false;
+      const angle = rand() * Math.PI * 2;
+      const radius = rand() * particles.spread;
+      this.envParticles.push({
+        mesh,
+        baseX: Math.cos(angle) * radius,
+        baseZ: Math.sin(angle) * radius,
+        phase: rand(),
+        speed: particles.speed * drag * (0.6 + rand() * 0.8),
+        rise,
+        sway: 0.25 + rand() * 0.9,
+      });
+    }
+  }
 
   private buildMapDecor(): void {
     const rock = this.material('islandRock', '#37342c');
@@ -942,6 +1156,25 @@ export class MapStage {
       );
       mote.mesh.scaling.setAll(0.5 + fade * 0.9);
       mote.mesh.visibility = 0.12 + fade * 0.62;
+    }
+    if (this.env.stars.twinkle) {
+      for (const star of this.envStars) {
+        star.mesh.visibility = 0.45 + Math.sin(time * 1.8 + star.phase) * 0.35 + 0.2;
+      }
+    }
+    const particleHeight = Math.max(0.5, this.env.particles.height);
+    for (const particle of this.envParticles) {
+      const t = (time * particle.speed + particle.phase) % 1;
+      const fade = 0.18 + Math.sin(Math.PI * t) * 0.82;
+      const y = particle.rise
+        ? GROUND_Y + t * particleHeight
+        : GROUND_Y + 0.4 + (1 - t) * particleHeight;
+      particle.mesh.position.set(
+        particle.baseX + Math.sin(time * 0.6 + particle.phase * 11) * particle.sway,
+        y,
+        particle.baseZ + Math.cos(time * 0.5 + particle.phase * 9) * particle.sway,
+      );
+      particle.mesh.visibility = fade;
     }
   }
 }

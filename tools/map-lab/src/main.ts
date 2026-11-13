@@ -1,11 +1,15 @@
 import {
   BUILTIN_MAP_META,
   BUILTIN_MAP_THEMES,
+  MAP_BASE_OPTIONS,
   MAP_SHAPES,
-  builtinTheme,
+  baseSubtitle,
+  baseTheme,
   createEmptyMapDoc,
+  createMapEnvSurface,
   createMapObject,
   duplicateMapDoc,
+  emptyMapEnv,
   isBuiltinMapId,
   mapMeta,
   normalizeMapDoc,
@@ -13,6 +17,7 @@ import {
   slugifyMapId,
   themeForDoc,
   type BuiltinMapId,
+  type MapBase,
   type MapDoc,
   type MapObject,
   type MapShape,
@@ -217,6 +222,7 @@ function activeDoc(): MapDoc | null {
         subtitle: meta.subtitle,
         base: selectedMapId,
         theme: { ...cloneTheme(BUILTIN_MAP_THEMES[selectedMapId]), label: meta.name },
+        env: emptyMapEnv(),
         objects: [],
       };
     }
@@ -439,13 +445,11 @@ function toggleObjectFlag(id: string, flag: 'visible' | 'locked'): void {
   afterChange({ inspector: true });
 }
 
-function createMap(base?: BuiltinMapId): void {
-  const sourceDoc = activeDoc();
-  const baseId: BuiltinMapId = base ?? (sourceDoc && isBuiltinMapId(sourceDoc.base) ? sourceDoc.base : sourceDoc?.base ?? 'jaddy');
-  const doc = createEmptyMapDoc(baseId);
+function createMap(base: MapBase = 'none'): void {
+  const doc = createEmptyMapDoc(base);
   const index = state.maps.length + 1;
   doc.name = index > 1 ? `Новая карта ${index}` : 'Новая карта';
-  doc.subtitle = `На основе «${mapMeta(baseId).name}»`;
+  doc.subtitle = baseSubtitle(base);
   state.maps.push(doc);
   selectedMapId = doc.id;
   selectedObjectId = null;
@@ -757,7 +761,10 @@ function renderStage(): void {
   const readOnly = isReadOnly(doc);
   stageEyebrow.textContent = readOnly ? 'Шаблон карты' : 'Редактор карты';
   stageTitle.textContent = doc.name;
-  stageSub.textContent = `${doc.subtitle || meta.subtitle} · окружение «${meta.name}»`;
+  stageSub.textContent =
+    doc.base === 'none'
+      ? doc.subtitle || 'Чистая доска без декораций'
+      : `${doc.subtitle || meta.subtitle} · окружение «${meta.name}»`;
   hudName.textContent = doc.name;
   hudMeta.innerHTML = `
     <span class="meta-chip" style="--chip:${doc.theme.accent}">◈ ${escapeHtml(meta.name)}</span>
@@ -833,10 +840,237 @@ function renderInspector(): void {
   renderMapInspector(doc);
 }
 
+const MAP_PARTICLE_LABELS: { value: string; label: string }[] = [
+  { value: 'embers', label: 'Угли' },
+  { value: 'ash', label: 'Пепел' },
+  { value: 'snow', label: 'Снег' },
+  { value: 'sparks', label: 'Искры' },
+];
+
+function renderEnvSection(doc: MapDoc, readOnly: boolean): string {
+  const env = doc.env;
+  const islandRows =
+    doc.base === 'none'
+      ? `
+      <details class="mat-section" open>
+        <summary>Остров</summary>
+        <div class="mat-body">
+          ${checkField('env.island.enabled', 'Пустой остров', 'Основание под доской, без декораций', env.island.enabled, readOnly)}
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField('env.island.radius', 'Радиус', env.island.radius, 6, 60, 0.5, readOnly)}
+            ${numberField('env.island.depth', 'Толщина', env.island.depth, 0.4, 14, 0.1, readOnly)}
+            ${numberField('env.island.courtRadius', 'Радиус площадки', env.island.courtRadius, 0, 40, 0.2, readOnly)}
+          </div>
+          <div class="color-fields" style="margin-top:8px">
+            ${colorField('env.island.topColor', 'Верх', env.island.topColor, readOnly)}
+            ${colorField('env.island.sideColor', 'Склон', env.island.sideColor, readOnly)}
+            ${colorField('env.island.rimColor', 'Кайма и площадка', env.island.rimColor, readOnly)}
+          </div>
+        </div>
+      </details>
+      <details class="mat-section">
+        <summary>Море</summary>
+        <div class="mat-body">
+          ${checkField('env.sea.enabled', 'Море', 'Вода вокруг острова', env.sea.enabled, readOnly)}
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField('env.sea.level', 'Уровень воды', env.sea.level, -12, 2, 0.1, readOnly)}
+            ${numberField('env.sea.size', 'Размер моря', env.sea.size, 20, 400, 5, readOnly)}
+          </div>
+          <div class="color-fields" style="margin-top:8px">
+            ${colorField('env.sea.color', 'Вода', env.sea.color, readOnly)}
+            ${colorField('env.sea.emissive', 'Свечение воды', env.sea.emissive, readOnly)}
+          </div>
+          <div class="field-grid two" style="margin-top:8px">
+            ${checkField('env.sea.foam', 'Пена у берега', 'Кольца прибоя вокруг острова', env.sea.foam, readOnly)}
+            ${colorField('env.sea.foamColor', 'Цвет пены', env.sea.foamColor, readOnly)}
+          </div>
+        </div>
+      </details>`
+      : `<p class="mini-hint">Остров и море доступны на базе «Без окружения». Для биомов используйте поверхности, небо, частицы и звёзды.</p>`;
+
+  const surfaceRows =
+    env.surfaces.length === 0
+      ? '<p class="mini-hint">Пока нет дополнительных поверхностей.</p>'
+      : env.surfaces
+          .map(
+            (surface, index) => `
+        <div class="env-surface-card" style="margin-top:8px">
+          <div class="env-surface-head">
+            <b>${escapeHtml(surface.name)}</b>
+            <button class="icon-mini danger" type="button" data-action="delete-surface" data-surface-id="${escapeHtml(
+              surface.id,
+            )}" title="Удалить поверхность" ${readOnly ? 'disabled' : ''}>×</button>
+          </div>
+          <div class="field-grid two">
+            ${textField(`env.surfaces.${index}.name`, 'Имя', surface.name, readOnly, 48)}
+            ${selectField(
+              `env.surfaces.${index}.shape`,
+              'Тип',
+              surface.shape,
+              [
+                { value: 'disc', label: 'Площадка' },
+                { value: 'box', label: 'Блок' },
+              ],
+              readOnly,
+            )}
+          </div>
+          ${vecGroup(`env.surfaces.${index}.position`, 'Позиция', surface.position, 0.1, -40, 40, readOnly)}
+          ${vecGroup(`env.surfaces.${index}.size`, 'Размер', surface.size, 0.1, 0.1, 80, readOnly)}
+          <div class="color-fields">
+            ${colorField(`env.surfaces.${index}.color`, 'Цвет', surface.color, readOnly)}
+            ${colorField(`env.surfaces.${index}.emissive`, 'Свечение', surface.emissive, readOnly)}
+          </div>
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField(`env.surfaces.${index}.alpha`, 'Прозрачность', surface.alpha, 0, 1, 0.01, readOnly)}
+          </div>
+        </div>`,
+          )
+          .join('');
+
+  return `
+    <div class="panel-section">
+      <div class="section-head"><span>Окружение</span><small>конструктор</small></div>
+      <div class="obj-actions env-preset-row" style="margin-top:0">
+        <button class="btn small" type="button" data-action="env-preset" data-preset="island" ${
+          readOnly || doc.base !== 'none' ? 'disabled' : ''
+        }>Остров</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="sea" ${
+          readOnly || doc.base !== 'none' ? 'disabled' : ''
+        }>Море</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="sky" ${
+          readOnly ? 'disabled' : ''
+        }>Небо</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="stars" ${
+          readOnly ? 'disabled' : ''
+        }>Звёзды</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="particles" ${
+          readOnly ? 'disabled' : ''
+        }>Частицы</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="base" ${
+          readOnly ? 'disabled' : ''
+        }>Базовое окружение</button>
+        <button class="btn small" type="button" data-action="env-preset" data-preset="clear" ${
+          readOnly ? 'disabled' : ''
+        }>Очистить</button>
+      </div>
+
+      ${islandRows}
+
+      <details class="mat-section">
+        <summary>Небо и туман</summary>
+        <div class="mat-body">
+          ${checkField(
+            'env.sky.enabled',
+            'Своё небо',
+            'Перекрывает небо и туман из темы карты',
+            env.sky.enabled,
+            readOnly,
+          )}
+          <div class="color-fields" style="margin-top:8px">
+            ${colorField('env.sky.color', 'Цвет неба', env.sky.color, readOnly)}
+            ${colorField('env.sky.fogColor', 'Цвет тумана', env.sky.fogColor, readOnly)}
+          </div>
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField('env.sky.fogDensity', 'Плотность тумана', env.sky.fogDensity, 0, 0.12, 0.001, readOnly)}
+          </div>
+        </div>
+      </details>
+
+      <details class="mat-section">
+        <summary>Частицы</summary>
+        <div class="mat-body">
+          ${checkField('env.particles.enabled', 'Частицы', 'Угли, пепел, снег или искры', env.particles.enabled, readOnly)}
+          <div class="field-grid two" style="margin-top:8px">${selectField(
+            'env.particles.kind',
+            'Тип',
+            env.particles.kind,
+            MAP_PARTICLE_LABELS,
+            readOnly,
+          )}</div>
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField('env.particles.count', 'Количество', env.particles.count, 4, 240, 1, readOnly)}
+            ${numberField('env.particles.size', 'Размер', env.particles.size, 0.01, 1, 0.01, readOnly)}
+            ${numberField('env.particles.speed', 'Скорость', env.particles.speed, 0.01, 1.2, 0.01, readOnly)}
+            ${numberField('env.particles.height', 'Высота', env.particles.height, 0.5, 30, 0.5, readOnly)}
+            ${numberField('env.particles.spread', 'Разброс', env.particles.spread, 0.5, 40, 0.5, readOnly)}
+          </div>
+          <div class="color-fields" style="margin-top:8px">
+            ${colorField('env.particles.color', 'Цвет частиц', env.particles.color, readOnly)}
+          </div>
+        </div>
+      </details>
+
+      <details class="mat-section">
+        <summary>Звёзды</summary>
+        <div class="mat-body">
+          ${checkField('env.stars.enabled', 'Звёзды', 'Отдельные светящиеся точки на фоне', env.stars.enabled, readOnly)}
+          <div class="theme-grid" style="margin-top:8px">
+            ${numberField('env.stars.count', 'Количество', env.stars.count, 4, 400, 1, readOnly)}
+            ${numberField('env.stars.size', 'Размер', env.stars.size, 0.02, 1.5, 0.01, readOnly)}
+            ${numberField('env.stars.distance', 'Дальность', env.stars.distance, 12, 140, 1, readOnly)}
+          </div>
+          <div class="color-fields" style="margin-top:8px">
+            ${colorField('env.stars.color', 'Цвет звёзд', env.stars.color, readOnly)}
+          </div>
+          <div class="field-grid two" style="margin-top:8px">
+            ${checkField('env.stars.twinkle', 'Мерцание', 'Плавно менять яркость', env.stars.twinkle, readOnly)}
+          </div>
+        </div>
+      </details>
+
+      <details class="mat-section">
+        <summary>Поверхности (${env.surfaces.length})</summary>
+        <div class="mat-body">
+          <p class="mini-hint">Площадки и блоки для декора и необычных арен. По ним можно ставить объекты.</p>
+          <div class="obj-actions" style="margin-top:8px">
+            <button class="btn small" type="button" data-action="add-surface" data-shape="disc" ${
+              readOnly ? 'disabled' : ''
+            }>＋ Площадка</button>
+            <button class="btn small" type="button" data-action="add-surface" data-shape="box" ${
+              readOnly ? 'disabled' : ''
+            }>＋ Блок</button>
+          </div>
+          ${surfaceRows}
+        </div>
+      </details>
+    </div>`;
+}
+
+function applyEnvPreset(doc: MapDoc, preset: string): void {
+  const defaults = emptyMapEnv();
+  switch (preset) {
+    case 'island':
+      doc.env.island = { ...defaults.island, enabled: true };
+      break;
+    case 'sea':
+      doc.env.sea = { ...defaults.sea, enabled: true };
+      break;
+    case 'sky':
+      doc.env.sky = { enabled: true, color: '#141a2e', fogColor: '#0a0d18', fogDensity: 0.006 };
+      break;
+    case 'stars':
+      doc.env.stars = { ...defaults.stars, enabled: true, count: 110, size: 0.28, distance: 70 };
+      break;
+    case 'particles':
+      doc.env.particles = { ...defaults.particles, enabled: true, kind: 'embers', color: '#ffb45e', count: 44 };
+      break;
+    case 'base':
+      doc.env.island = { ...defaults.island, enabled: true };
+      doc.env.sea = { ...defaults.sea, enabled: true };
+      doc.env.sky = { enabled: true, color: '#0d1626', fogColor: '#091019', fogDensity: 0.008 };
+      break;
+    case 'clear':
+      doc.env = emptyMapEnv();
+      break;
+    default:
+      break;
+  }
+}
+
 function renderMapInspector(doc: MapDoc): void {
   const readOnly = isReadOnly(doc);
   const theme = doc.theme;
-  const baseOptions = BUILTIN_MAP_META.map((meta) => ({ value: meta.id, label: meta.name }));
+  const baseOptions = MAP_BASE_OPTIONS;
   const materials = MAT_GROUPS.map(
     (group) => `
       <details class="mat-section">
@@ -908,6 +1142,8 @@ function renderMapInspector(doc: MapDoc): void {
         ${colorField('theme.tiles.enemyDark', 'Тёмная плитка врага', theme.tiles.enemyDark, readOnly)}
       </div>
     </div>
+
+    ${renderEnvSection(doc, readOnly)}
 
     <div class="panel-section">
       <div class="section-head"><span>Материалы окружения</span><small>${MAT_GROUPS.length} группы</small></div>
@@ -1097,20 +1333,28 @@ function applyInspectorValue(input: HTMLInputElement | HTMLSelectElement): boole
     value = input.value;
   }
 
+  const previousBase = path === 'base' ? doc.base : null;
   setByPath(target, path, value);
 
   if (path === 'name') {
     doc.theme.label = doc.name;
   }
-  if (path === 'base') {
-    const base = doc.base as BuiltinMapId;
+  if (path === 'base' && previousBase) {
+    const base = doc.base as MapBase;
     const previousLabel = doc.name;
-    doc.theme = { ...cloneTheme(builtinTheme(base)), label: previousLabel };
+    doc.theme = { ...cloneTheme(baseTheme(base)), label: previousLabel };
+    // Keep the auto-generated subtitle in sync when it was not customised.
+    const generated =
+      doc.subtitle === baseSubtitle(previousBase) ||
+      doc.subtitle.startsWith('На основе') ||
+      doc.subtitle.startsWith('Копия шаблона');
+    if (generated) doc.subtitle = baseSubtitle(base);
   }
   if (tab === 'object' && selectedObject() && path === 'locked') {
     preview?.setSelection(selectedObjectId);
   }
-  afterChange({ inspector: path === 'base' });
+  const rerenderInspector = path === 'base' || (input.dataset.type === 'bool' && path.startsWith('env.'));
+  afterChange({ inspector: rerenderInspector });
   return true;
 }
 
@@ -1174,7 +1418,8 @@ inspectorBody.addEventListener('click', (event) => {
       if (object) {
         recordUndo();
         const onBoard = Math.abs(object.position[0]) <= 4 && Math.abs(object.position[2]) <= 4;
-        const surface = onBoard ? 0 : -1.15;
+        const onIsland = !onBoard && activeDoc()?.base === 'none' && activeDoc()?.env.island.enabled;
+        const surface = onBoard ? 0 : onIsland ? -1.15 : activeDoc()?.base === 'none' ? -0.3 : -1.15;
         object.position[1] = round(surface + (object.shape === 'plane' ? 0.01 : object.scale[1] / 2), 3);
         afterChange({ inspector: true });
       }
@@ -1202,6 +1447,37 @@ inspectorBody.addEventListener('click', (event) => {
     case 'delete-map':
       if (doc) deleteMap(doc.id);
       break;
+    case 'env-preset': {
+      const preset = action.dataset.preset;
+      if (doc && preset) {
+        recordUndo();
+        applyEnvPreset(doc, preset);
+        afterChange({ inspector: true });
+      }
+      break;
+    }
+    case 'add-surface': {
+      if (doc) {
+        recordUndo();
+        const surface = createMapEnvSurface(action.dataset.shape === 'box' ? 'box' : 'disc');
+        surface.position[1] = doc.base === 'none' && !doc.env.island.enabled ? -0.3 : -1.15;
+        doc.env.surfaces.push(surface);
+        afterChange({ inspector: true });
+      }
+      break;
+    }
+    case 'delete-surface': {
+      if (doc) {
+        const id = action.dataset.surfaceId;
+        const index = doc.env.surfaces.findIndex((surface) => surface.id === id);
+        if (index >= 0) {
+          recordUndo();
+          doc.env.surfaces.splice(index, 1);
+          afterChange({ inspector: true });
+        }
+      }
+      break;
+    }
     default:
       break;
   }
@@ -1557,9 +1833,9 @@ async function seedMapsFromServer(): Promise<void> {
 async function boot(): Promise<void> {
   await seedMapsFromServer();
   if (state.maps.length === 0) {
-    const doc = createEmptyMapDoc('jaddy');
+    const doc = createEmptyMapDoc('none');
     doc.name = 'Моя карта';
-    doc.subtitle = 'На основе «Jaddy Forest»';
+    doc.subtitle = baseSubtitle('none');
     state.maps.push(doc);
     selectedMapId = doc.id;
     saveState(state);

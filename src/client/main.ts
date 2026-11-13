@@ -2,7 +2,6 @@ import { getUnitDef } from '../shared/content';
 import {
   BENCH_SIZE,
   CLASS_NAMES,
-  DEFAULT_SETTINGS,
   PLAYER_ROWS,
   RACE_NAMES,
   SHOP_ODDS,
@@ -23,6 +22,7 @@ import { ShopPreview } from './shopPreview';
 import { loadTuningFromServer } from './tuningRuntime';
 import { BUILTIN_MAP_META, mapAccent } from '../shared/maps';
 import { getCustomMap, getCustomMaps, loadMapsFromServer } from './mapRuntime';
+import { MenuBackdrop } from './menuBackdrop';
 
 // Временный переключатель наборного шрифта: ?font=onest|golos|inter|rubik|nunito|manrope
 // (после выбора шрифта эту строку и пресеты в style.css можно оставить только для одного)
@@ -107,13 +107,76 @@ function mapOption(id: MapId): MapOption {
   return MAP_OPTIONS.find((entry) => entry.id === id) ?? MAP_OPTIONS[0];
 }
 
+interface AvatarDef {
+  id: string;
+  glyph: string;
+  tone: string;
+}
+
+const AVATARS: AvatarDef[] = [
+  { id: 'knight', glyph: '♞', tone: '#e3b964' },
+  { id: 'rook', glyph: '♜', tone: '#7fd7ff' },
+  { id: 'spade', glyph: '♠', tone: '#b07cff' },
+  { id: 'star', glyph: '✦', tone: '#7de09a' },
+  { id: 'swords', glyph: '⚔', tone: '#ff8a5a' },
+  { id: 'skull', glyph: '☠', tone: '#d9e2ec' },
+  { id: 'crown', glyph: '♛', tone: '#f6dfa4' },
+  { id: 'gear', glyph: '⚙', tone: '#8fb8e8' },
+];
+
+interface LocalProfile {
+  name: string;
+  avatar: string;
+}
+
+function readJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadAccounts(): LocalProfile[] {
+  const list = readJson<unknown>('autoflow.accounts', []);
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((entry): entry is LocalProfile => Boolean(entry) && typeof entry === 'object')
+    .map((entry) => ({
+      name: String((entry as LocalProfile).name ?? '').slice(0, 18),
+      avatar: String((entry as LocalProfile).avatar ?? AVATARS[0].id),
+    }))
+    .filter((entry) => entry.name.length > 0);
+}
+
+function saveAccounts(accounts: LocalProfile[]): void {
+  localStorage.setItem('autoflow.accounts', JSON.stringify(accounts));
+}
+
+function storedAvatarId(): string {
+  const profile = readJson<Partial<LocalProfile> | null>('autoflow.profile', null);
+  const id = profile?.avatar ?? localStorage.getItem('autoflow.avatar') ?? AVATARS[0].id;
+  return AVATARS.some((avatar) => avatar.id === id) ? id : AVATARS[0].id;
+}
+
+function avatarById(id: string): AvatarDef {
+  return AVATARS.find((avatar) => avatar.id === id) ?? AVATARS[0];
+}
+
+function avatarStyle(id: string): string {
+  return `--avatar-tone:${avatarById(id).tone}`;
+}
+
 let room: RoomView | null = null;
 let battle: BattleSnapshot | null = null;
 let selectedUid: string | null = null;
 let lastRoomAt = 0;
 let gameOverShown = false;
 let surrenderPending = false;
-let currentScreen: 'menu' | 'lobby' | 'game' = 'menu';
+type ScreenName = 'auth' | 'menu' | 'play' | 'map' | 'create' | 'lobby' | 'game';
+let currentScreen: ScreenName = 'auth';
+let createOrigin: ScreenName = 'menu';
 let lastTooltipDef: string | null = null;
 let lastTooltipPlayer: string | null = null;
 let shopSig = '';
@@ -172,6 +235,20 @@ const hudPhaseCard = byId('hudPhaseCard');
 const hudFocusRing = document.getElementById('hudFocusRing') as unknown as SVGCircleElement;
 const lobbyBoardPreview = byId('lobbyBoardPreview');
 const lobbyBoardName = byId('lobbyBoardName');
+const playNameLabel = byId('playNameLabel');
+const playMapName = byId('playMapName');
+const playAvatarGlyph = byId('playAvatarGlyph');
+const menuAvatarGlyph = byId('menuAvatarGlyph');
+const menuLevelValue = byId('menuLevelValue');
+const menuXpFill = byId('menuXpFill');
+const mapCurrentName = byId('mapCurrentName');
+const authNameInput = byId<HTMLInputElement>('authNameInput');
+const authSubmit = byId<HTMLButtonElement>('authSubmit');
+const authContinue = byId<HTMLButtonElement>('authContinue');
+const authAvatarGrid = byId('authAvatarGrid');
+const authMessage = byId('authMessage');
+const menuCanvas = byId<HTMLCanvasElement>('menuCanvas');
+let menuBackdrop: MenuBackdrop | null = null;
 
 const storedName = localStorage.getItem('autoflow.name') ?? '';
 playerNameInput.value = storedName;
@@ -248,7 +325,52 @@ function syncMapLabels(): void {
   document.body.dataset.map = currentMap;
   document.body.style.setProperty('--map-accent', mapAccent(currentMap, doc));
   lobbyBoardPreview.dataset.map = currentMap;
+  lobbyBoardPreview.style.setProperty('--map-light', option.light);
+  lobbyBoardPreview.style.setProperty('--map-dark', option.dark);
+  lobbyBoardPreview.style.setProperty('--map-glow', option.glow);
   lobbyBoardName.textContent = option.name;
+  playMapName.textContent = option.name;
+  mapCurrentName.textContent = option.name;
+  const mapOrb = document.querySelector<HTMLElement>('.map-orb-art');
+  if (mapOrb) {
+    mapOrb.style.setProperty('--map-light', option.light);
+    mapOrb.style.setProperty('--map-dark', option.dark);
+    mapOrb.style.setProperty('--map-glow', option.glow);
+  }
+}
+
+function syncAvatarUI(): void {
+  const avatar = avatarById(storedAvatarId());
+  for (const glyph of [menuAvatarGlyph, playAvatarGlyph]) {
+    glyph.textContent = avatar.glyph;
+    glyph.style.setProperty('--avatar-tone', avatar.tone);
+  }
+}
+
+const XP_PER_LEVEL = 100;
+
+function playerXp(): number {
+  const stored = Number(localStorage.getItem('autoflow.xp') ?? '0');
+  return Number.isFinite(stored) && stored > 0 ? Math.floor(stored) : 0;
+}
+
+function syncProgressUI(): void {
+  const xp = playerXp();
+  menuLevelValue.textContent = String(Math.floor(xp / XP_PER_LEVEL) + 1);
+  menuXpFill.style.width = `${xp % XP_PER_LEVEL}%`;
+}
+
+function grantMatchXp(placement: number): void {
+  const gained = Math.max(12, 40 - Math.max(1, placement) * 4);
+  localStorage.setItem('autoflow.xp', String(playerXp() + gained));
+  syncProgressUI();
+}
+
+function syncNameLabels(): void {
+  const name = playerNameInput.value.trim() || 'Странник';
+  playNameLabel.textContent = name;
+  syncAvatarUI();
+  syncProgressUI();
 }
 
 function selectMap(id: MapId): void {
@@ -256,6 +378,7 @@ function selectMap(id: MapId): void {
   currentMap = id;
   localStorage.setItem('autoflow.map', currentMap);
   scene.setMap(currentMap, getCustomMap(currentMap));
+  menuBackdrop?.setMap(currentMap, getCustomMap(currentMap));
   syncMapLabels();
   renderMapGrid();
   toast(`Доска: ${mapOption(currentMap).name}`, 'success');
@@ -269,19 +392,24 @@ function setShopOpen(open: boolean): void {
   shopToggleBtn.setAttribute('aria-pressed', String(shopOpen));
 }
 
-function showScreen(name: 'menu' | 'lobby' | 'game'): void {
+function showScreen(name: ScreenName): void {
   currentScreen = name;
   for (const screen of document.querySelectorAll<HTMLElement>('.screen')) {
     screen.classList.toggle('active', screen.id === `${name}-screen`);
   }
   document.body.classList.toggle('in-game', name === 'game');
+  document.body.classList.toggle('in-menu', name === 'menu' || name === 'auth');
   if (name === 'game') scene.show();
+  if (name === 'map') renderMapGrid();
+  if (name === 'menu') menuBackdrop?.show();
+  else menuBackdrop?.hide();
 }
 
 function currentName(): string {
   const value = playerNameInput.value.trim().slice(0, 18);
   const name = value || 'Странник';
   localStorage.setItem('autoflow.name', name);
+  syncNameLabels();
   net.setName(name);
   return name;
 }
@@ -310,15 +438,12 @@ function toast(message: string, kind: 'info' | 'error' | 'success' = 'info'): vo
 
 function setConnection(status: 'connecting' | 'online' | 'offline'): void {
   connectionBadge.classList.remove('online', 'offline');
-  if (status === 'online') {
-    connectionBadge.textContent = 'На связи';
-    connectionBadge.classList.add('online');
-  } else if (status === 'offline') {
-    connectionBadge.textContent = 'Нет связи';
-    connectionBadge.classList.add('offline');
-  } else {
-    connectionBadge.textContent = 'Соединение...';
-  }
+  const label = status === 'online' ? 'На связи' : status === 'offline' ? 'Нет связи' : 'Соединение...';
+  connectionBadge.textContent = label;
+  if (status === 'online') connectionBadge.classList.add('online');
+  else if (status === 'offline') connectionBadge.classList.add('offline');
+  const settingsConnection = document.getElementById('settingsConnection');
+  if (settingsConnection) settingsConnection.textContent = label;
 }
 
 net.onStatus = setConnection;
@@ -330,6 +455,7 @@ function handleServerMessage(message: ServerMessage): void {
       if (!playerNameInput.value.trim()) {
         playerNameInput.value = message.playerName;
       }
+      syncNameLabels();
       break;
     case 'lobby_list':
       renderLobbyList(message.lobbies);
@@ -1197,81 +1323,13 @@ function renderLobbyList(lobbies: { code: string; name: string; hostName: string
     .join('');
 }
 
-function openCreateModal(): void {
-  const name = currentName();
-  modalRoot.innerHTML = `
-    <div class="modal-backdrop" id="createModal">
-      <div class="modal">
-        <h2>Создать лобби</h2>
-        <p class="modal-sub">Настройте правила зала. Код можно отправить друзьям, а свободные места займут боты.</p>
-        <form id="createForm">
-          <div class="form-grid">
-            <label class="form-field full">
-              <span>Название зала</span>
-              <input name="roomName" maxlength="30" value="${escapeHtml(`${name}: арена`)}" />
-            </label>
-            <label class="form-field">
-              <span>Максимум игроков</span>
-              <select name="maxPlayers">
-                ${[2, 3, 4, 5, 6, 7, 8].map((n) => `<option value="${n}" ${n === DEFAULT_SETTINGS.maxPlayers ? 'selected' : ''}>${n}</option>`).join('')}
-              </select>
-            </label>
-            <label class="form-field">
-              <span>Стартовое золото</span>
-              <input name="startingGold" type="number" min="0" max="20" value="${DEFAULT_SETTINGS.startingGold}" />
-            </label>
-            <label class="form-field">
-              <span>Стартовый уровень</span>
-              <select name="startingLevel">
-                ${[1, 2, 3, 4, 5, 6, 7].map((n) => `<option value="${n}" ${n === DEFAULT_SETTINGS.startingLevel ? 'selected' : ''}>${n}</option>`).join('')}
-              </select>
-            </label>
-            <label class="form-field">
-              <span>Жизни</span>
-              <input name="startingLives" type="number" min="5" max="60" value="${DEFAULT_SETTINGS.startingLives}" />
-            </label>
-            <label class="form-field">
-              <span>Подготовка, сек</span>
-              <input name="prepSeconds" type="number" min="10" max="90" value="${DEFAULT_SETTINGS.prepSeconds}" />
-            </label>
-            <label class="form-field">
-              <span>Максимум раундов</span>
-              <input name="maxRounds" type="number" min="5" max="40" value="${DEFAULT_SETTINGS.maxRounds}" />
-            </label>
-            <div class="check-row full">
-              <label class="check-field"><input type="checkbox" name="aiFill" checked /> Добивать свободные места ботами</label>
-              <label class="check-field"><input type="checkbox" name="privateLobby" /> Приватное лобби (только по коду)</label>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button class="btn" type="button" id="cancelCreate">Отмена</button>
-            <button class="btn btn-primary" type="submit">Создать зал</button>
-          </div>
-        </form>
-      </div>
-    </div>`;
-  byId('cancelCreate').addEventListener('click', closeModal);
-  byId('createModal').addEventListener('click', (event) => {
-    if ((event.target as HTMLElement).id === 'createModal') closeModal();
-  });
-  byId<HTMLFormElement>('createForm').addEventListener('submit', (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget as HTMLFormElement);
-    const settings: Partial<LobbySettings> = {
-      maxPlayers: Number(form.get('maxPlayers')),
-      startingGold: Number(form.get('startingGold')),
-      startingLevel: Number(form.get('startingLevel')),
-      startingLives: Number(form.get('startingLives')),
-      prepSeconds: Number(form.get('prepSeconds')),
-      maxRounds: Number(form.get('maxRounds')),
-      aiFill: form.get('aiFill') === 'on',
-      privateLobby: form.get('privateLobby') === 'on',
-    };
-    gameOverShown = false;
-    surrenderPending = false;
-    net.send({ type: 'create_lobby', name: String(form.get('roomName') ?? 'Арена'), settings });
-    closeModal();
-  });
+function openCreateScreen(): void {
+  if (!requireOnline()) return;
+  createOrigin = currentScreen === 'play' ? 'play' : 'menu';
+  syncName();
+  const roomName = document.querySelector<HTMLInputElement>('#createForm [name="roomName"]');
+  if (roomName) roomName.value = `${currentName()}: арена`;
+  showScreen('create');
 }
 
 function openRulesModal(): void {
@@ -1354,6 +1412,339 @@ function closeModal(): void {
   modalRoot.innerHTML = '';
 }
 
+// ---------- Auth, profile and settings ----------
+
+let authMode: 'login' | 'register' = 'login';
+let pendingAuthAvatar = AVATARS[0].id;
+
+function renderAuthAvatarGrid(): void {
+  authAvatarGrid.innerHTML = AVATARS.map(
+    (avatar) => `
+      <button class="avatar-choice ${avatar.id === pendingAuthAvatar ? 'selected' : ''}" type="button"
+        data-auth-avatar="${avatar.id}" style="${avatarStyle(avatar.id)}" aria-label="Аватар ${avatar.id}"
+        aria-pressed="${avatar.id === pendingAuthAvatar}">
+        <span>${avatar.glyph}</span>
+      </button>`,
+  ).join('');
+}
+
+function setAuthMode(mode: 'login' | 'register'): void {
+  authMode = mode;
+  for (const tab of document.querySelectorAll<HTMLElement>('[data-auth-mode]')) {
+    tab.classList.toggle('active', tab.dataset.authMode === mode);
+  }
+  authAvatarGrid.classList.toggle('hidden', mode === 'login');
+  authSubmit.textContent = mode === 'login' ? 'Войти' : 'Создать профиль';
+  authMessage.textContent = '';
+  authMessage.className = 'auth-message';
+}
+
+function findAccount(name: string): LocalProfile | null {
+  const needle = name.trim().toLowerCase();
+  return loadAccounts().find((account) => account.name.toLowerCase() === needle) ?? null;
+}
+
+function commitProfile(name: string, avatarId: string): string {
+  const clean = name.trim().slice(0, 18) || 'Странник';
+  const avatar = AVATARS.some((entry) => entry.id === avatarId) ? avatarId : AVATARS[0].id;
+  playerNameInput.value = clean;
+  localStorage.setItem('autoflow.name', clean);
+  localStorage.setItem('autoflow.avatar', avatar);
+  localStorage.setItem('autoflow.profile', JSON.stringify({ name: clean, avatar }));
+  const accounts = loadAccounts();
+  const index = accounts.findIndex((account) => account.name.toLowerCase() === clean.toLowerCase());
+  const entry: LocalProfile = { name: clean, avatar };
+  if (index >= 0) accounts[index] = entry;
+  else accounts.push(entry);
+  saveAccounts(accounts);
+  syncNameLabels();
+  if (net.playerId) net.send({ type: 'set_name', name: clean });
+  return clean;
+}
+
+function enterWithProfile(name: string, avatarId: string): void {
+  commitProfile(name, avatarId);
+  authMessage.textContent = '';
+  showScreen('menu');
+}
+
+function setupAuth(): void {
+  const profile = readJson<Partial<LocalProfile> | null>('autoflow.profile', null);
+  const accounts = loadAccounts();
+  pendingAuthAvatar = storedAvatarId();
+  renderAuthAvatarGrid();
+  authNameInput.value = profile?.name ?? playerNameInput.value;
+  authContinue.classList.toggle('hidden', !profile?.name);
+  if (profile?.name) authContinue.textContent = `Продолжить как ${profile.name}`;
+  setAuthMode(accounts.length === 0 ? 'register' : 'login');
+}
+
+function openSettingsModal(): void {
+  const selected = storedAvatarId();
+  let selectedAvatar = selected;
+  const avatar = avatarById(selected);
+  const currentMapName = mapOption(currentMap).name;
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="settingsModal">
+      <div class="modal settings-modal">
+        <header class="modal-head">
+          <h2>Настройки</h2>
+          <button class="menu-orb tiny" id="closeSettings" type="button" aria-label="Закрыть" title="Закрыть">
+            <span class="orb-glyph close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <div class="settings-modal-grid">
+          <section class="settings-profile">
+            <div class="settings-avatar-preview" id="settingsAvatarPreview" style="${avatarStyle(selected)}">
+              <span>${avatar.glyph}</span>
+            </div>
+            <label class="form-field">
+              <span>Позывной</span>
+              <input id="settingsNameInput" maxlength="18" autocomplete="nickname" value="${escapeHtml(playerNameInput.value || 'Странник')}" />
+            </label>
+            <div id="settingsAvatarGrid" class="avatar-grid">
+              ${AVATARS.map(
+                (entry) => `
+                  <button class="avatar-choice ${entry.id === selected ? 'selected' : ''}" type="button"
+                    data-settings-avatar="${entry.id}" style="${avatarStyle(entry.id)}" aria-label="Аватар ${entry.id}"
+                    aria-pressed="${entry.id === selected}">
+                    <span>${entry.glyph}</span>
+                  </button>`,
+              ).join('')}
+            </div>
+          </section>
+          <section class="settings-tools">
+            <a class="tool-card panel" href="/tools/map-lab/" target="_blank" rel="noreferrer">
+              <span class="tool-icon map" aria-hidden="true"></span>
+              <b>Map Lab ↗</b>
+              <small>Редактор карт и окружения.</small>
+            </a>
+            <a class="tool-card panel" href="/tools/unit-lab/" target="_blank" rel="noreferrer">
+              <span class="tool-icon unit" aria-hidden="true"></span>
+              <b>Unit Lab ↗</b>
+              <small>Бойцы, модели и характеристики.</small>
+            </a>
+            <div class="settings-meta">
+              <div class="setting-tile"><span>Сервер</span><b id="settingsConnection">${connectionBadge.textContent ?? 'Соединение...'}</b></div>
+              <div class="setting-tile"><span>Доска</span><b>${escapeHtml(currentMapName)}</b></div>
+              <div class="setting-tile"><span>Версия</span><b>0.1.0</b></div>
+            </div>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <button class="btn" id="cancelSettings" type="button">Отмена</button>
+          <button class="btn btn-primary" id="saveSettings" type="button">Сохранить</button>
+        </div>
+      </div>
+    </div>`;
+
+  const grid = byId('settingsAvatarGrid');
+  const preview = byId('settingsAvatarPreview');
+  const nameInput = byId<HTMLInputElement>('settingsNameInput');
+
+  grid.addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest('[data-settings-avatar]') as HTMLElement | null;
+    if (!target?.dataset.settingsAvatar) return;
+    selectedAvatar = target.dataset.settingsAvatar;
+    const chosen = avatarById(selectedAvatar);
+    preview.style.setProperty('--avatar-tone', chosen.tone);
+    preview.innerHTML = `<span>${chosen.glyph}</span>`;
+    for (const button of grid.querySelectorAll<HTMLElement>('[data-settings-avatar]')) {
+      const active = button.dataset.settingsAvatar === selectedAvatar;
+      button.classList.toggle('selected', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+  });
+
+  const close = (): void => closeModal();
+  byId('closeSettings').addEventListener('click', close);
+  byId('cancelSettings').addEventListener('click', close);
+  byId('saveSettings').addEventListener('click', () => {
+    commitProfile(nameInput.value, selectedAvatar);
+    closeModal();
+    toast('Настройки сохранены.', 'success');
+  });
+  byId('settingsModal').addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).id === 'settingsModal') closeModal();
+  });
+}
+
+function startQuickMatch(options: { maxPlayers?: number; preset?: 'tower' } = {}): void {
+  if (!requireOnline()) return;
+  syncName();
+  gameOverShown = false;
+  surrenderPending = false;
+  net.send({ type: 'quick_play', maxPlayers: options.maxPlayers, preset: options.preset });
+}
+
+function openModesModal(): void {
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="modesModal">
+      <div class="modal mode-modal">
+        <header class="modal-head">
+          <h2>Режимы игры</h2>
+          <button class="menu-orb tiny" id="closeModes" type="button" aria-label="Закрыть" title="Закрыть">
+            <span class="orb-glyph close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <div class="mode-grid">
+          <button class="mode-card" type="button" data-match-mode="quick6">
+            <span class="mode-icon" aria-hidden="true"><span class="orb-glyph swords"></span></span>
+            <b>Быстрый 1×6</b>
+            <small>Шесть мест за столом, короткая партия с ботами.</small>
+            <span class="mode-tag">6 игроков</span>
+          </button>
+          <button class="mode-card" type="button" data-match-mode="quick8">
+            <span class="mode-icon" aria-hidden="true"><span class="orb-glyph users"></span></span>
+            <b>Быстрый 1×8</b>
+            <small>Полный стол на восемь мест и больше соперников.</small>
+            <span class="mode-tag">8 игроков</span>
+          </button>
+          <button class="mode-card" type="button" data-match-mode="tower">
+            <span class="mode-icon" aria-hidden="true"><span class="orb-glyph tower"></span></span>
+            <b>Башня</b>
+            <small>Выживание против волн ботов: меньше жизней и времени.</small>
+            <span class="mode-tag">Испытание</span>
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  byId('closeModes').addEventListener('click', closeModal);
+  byId('modesModal').addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    if (target.id === 'modesModal') {
+      closeModal();
+      return;
+    }
+    const card = target.closest('[data-match-mode]') as HTMLElement | null;
+    const mode = card?.dataset.matchMode;
+    if (!mode) return;
+    closeModal();
+    if (mode === 'quick6') startQuickMatch({ maxPlayers: 6 });
+    else if (mode === 'quick8') startQuickMatch({ maxPlayers: 8 });
+    else startQuickMatch({ maxPlayers: 8, preset: 'tower' });
+  });
+}
+
+function openNetworkModal(): void {
+  modalRoot.innerHTML = `
+    <div class="modal-backdrop" id="networkModal">
+      <div class="modal network-modal">
+        <header class="modal-head">
+          <h2>Сетевая игра</h2>
+          <button class="menu-orb tiny" id="closeNetwork" type="button" aria-label="Закрыть" title="Закрыть">
+            <span class="orb-glyph close" aria-hidden="true"></span>
+          </button>
+        </header>
+        <div class="network-grid">
+          <button class="network-tile" id="networkCreate" type="button">
+            <span class="mode-icon" aria-hidden="true"><span class="orb-glyph plus"></span></span>
+            <span><b>Создать лобби</b><small>Свои правила, карта и боты.</small></span>
+          </button>
+          <button class="network-tile" id="networkBrowse" type="button">
+            <span class="mode-icon" aria-hidden="true"><span class="orb-glyph users"></span></span>
+            <span><b>Список лобби</b><small>Открытые залы и быстрый вход.</small></span>
+          </button>
+          <div class="network-join">
+            <span>Код лобби</span>
+            <div class="join-row">
+              <input id="networkCodeInput" maxlength="5" placeholder="КОД" spellcheck="false" autocomplete="off" />
+              <button class="btn btn-primary" id="networkJoinBtn" type="button">Войти</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  const input = byId<HTMLInputElement>('networkCodeInput');
+  const joinByCode = (): void => {
+    if (!requireOnline()) return;
+    syncName();
+    const code = input.value.trim().toUpperCase();
+    if (code.length < 4) {
+      toast('Введите код лобби.', 'error');
+      return;
+    }
+    closeModal();
+    net.send({ type: 'join_lobby', code });
+  };
+
+  byId('closeNetwork').addEventListener('click', closeModal);
+  byId('networkModal').addEventListener('click', (event) => {
+    if ((event.target as HTMLElement).id === 'networkModal') closeModal();
+  });
+  byId('networkCreate').addEventListener('click', () => {
+    closeModal();
+    openCreateScreen();
+  });
+  byId('networkBrowse').addEventListener('click', () => {
+    closeModal();
+    showScreen('play');
+    net.send({ type: 'list_lobbies' });
+  });
+  byId('networkJoinBtn').addEventListener('click', joinByCode);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') joinByCode();
+  });
+  input.addEventListener('input', () => {
+    input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  });
+  window.setTimeout(() => input.focus(), 80);
+}
+
+function setupAuthListeners(): void {
+  for (const tab of document.querySelectorAll<HTMLElement>('[data-auth-mode]')) {
+    tab.addEventListener('click', () => {
+      const mode = tab.dataset.authMode;
+      if (mode === 'login' || mode === 'register') setAuthMode(mode);
+    });
+  }
+
+  authAvatarGrid.addEventListener('click', (event) => {
+    const target = (event.target as HTMLElement).closest('[data-auth-avatar]') as HTMLElement | null;
+    if (!target?.dataset.authAvatar) return;
+    pendingAuthAvatar = target.dataset.authAvatar;
+    for (const button of authAvatarGrid.querySelectorAll<HTMLElement>('[data-auth-avatar]')) {
+      const active = button.dataset.authAvatar === pendingAuthAvatar;
+      button.classList.toggle('selected', active);
+      button.setAttribute('aria-pressed', String(active));
+    }
+  });
+
+  byId<HTMLFormElement>('authForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = authNameInput.value.trim();
+    if (!name) {
+      authMessage.textContent = 'Введите позывной.';
+      authMessage.className = 'auth-message error';
+      return;
+    }
+    if (authMode === 'login') {
+      const account = findAccount(name);
+      if (!account) {
+        authMessage.textContent = 'Такой профиль не найден. Создайте новый.';
+        authMessage.className = 'auth-message error';
+        return;
+      }
+      enterWithProfile(account.name, account.avatar);
+      return;
+    }
+    if (findAccount(name)) {
+      authMessage.textContent = 'Этот позывной уже занят. Выберите другой.';
+      authMessage.className = 'auth-message error';
+      return;
+    }
+    enterWithProfile(name, pendingAuthAvatar);
+  });
+
+  authContinue.addEventListener('click', () => {
+    const profile = readJson<Partial<LocalProfile> | null>('autoflow.profile', null);
+    if (!profile?.name) return;
+    enterWithProfile(profile.name, profile.avatar ?? storedAvatarId());
+  });
+}
+
 function showGameOver(
   placement: number,
   totalPlayers: number,
@@ -1362,6 +1753,7 @@ function showGameOver(
 ): void {
   if (gameOverShown) return;
   gameOverShown = true;
+  grantMatchXp(placement);
   if (reason === 'surrender') {
     gameOverTitle.textContent = 'Вы сдались';
     gameOverText.textContent = `Матч завершён для вас. Итоговое место — ${placement} из ${totalPlayers}.`;
@@ -1525,18 +1917,46 @@ playerNameInput.addEventListener('change', () => {
   net.send({ type: 'set_name', name });
 });
 
-byId('quickPlay').addEventListener('click', () => {
-  if (!requireOnline()) return;
-  syncName();
-  gameOverShown = false;
-  surrenderPending = false;
-  net.send({ type: 'quick_play' });
+document.addEventListener('click', (event) => {
+  const target = (event.target as HTMLElement).closest('[data-open-screen]') as HTMLElement | null;
+  let screen = target?.dataset.openScreen as ScreenName | undefined;
+  if (!screen || !['menu', 'play', 'map', 'create'].includes(screen)) return;
+  if (screen === 'create') {
+    openCreateScreen();
+    return;
+  }
+  // When a map is changed from inside a lobby, the back arrow returns to that lobby.
+  if (screen === 'menu' && currentScreen === 'map' && room) screen = 'lobby';
+  if (screen === 'menu' && currentScreen === 'create') screen = createOrigin;
+  showScreen(screen);
 });
 
-byId('openCreate').addEventListener('click', () => {
+byId('menuProfileBtn').addEventListener('click', openSettingsModal);
+byId('menuModesBtn').addEventListener('click', openModesModal);
+byId('menuNetworkBtn').addEventListener('click', openNetworkModal);
+byId('menuShopBtn').addEventListener('click', () => toast('Магазин появится в следующем обновлении.'));
+byId('menuInventoryBtn').addEventListener('click', () => toast('Инвентарь появится в следующем обновлении.'));
+
+byId('quickPlay').addEventListener('click', () => startQuickMatch({ maxPlayers: 6 }));
+
+byId<HTMLFormElement>('createForm').addEventListener('submit', (event) => {
+  event.preventDefault();
   if (!requireOnline()) return;
   syncName();
-  openCreateModal();
+  const form = new FormData(event.currentTarget as HTMLFormElement);
+  const settings: Partial<LobbySettings> = {
+    maxPlayers: Number(form.get('maxPlayers')),
+    startingGold: Number(form.get('startingGold')),
+    startingLevel: Number(form.get('startingLevel')),
+    startingLives: Number(form.get('startingLives')),
+    prepSeconds: Number(form.get('prepSeconds')),
+    maxRounds: Number(form.get('maxRounds')),
+    aiFill: form.get('aiFill') === 'on',
+    privateLobby: form.get('privateLobby') === 'on',
+  };
+  gameOverShown = false;
+  surrenderPending = false;
+  net.send({ type: 'create_lobby', name: String(form.get('roomName') ?? 'Арена'), settings });
 });
 
 byId('joinBtn').addEventListener('click', () => {
@@ -1749,6 +2169,12 @@ async function boot(): Promise<void> {
   scene.setMap(currentMap, getCustomMap(currentMap));
   renderMapGrid();
   syncMapLabels();
+  syncNameLabels();
+  syncAvatarUI();
+  setupAuth();
+  setupAuthListeners();
+  menuBackdrop = new MenuBackdrop(menuCanvas, currentMap, getCustomMap(currentMap));
+  showScreen('auth');
   net.connect(currentName());
 }
 

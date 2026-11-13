@@ -27,6 +27,7 @@ import { getUnitDef } from '../shared/content';
 import {
   BUILTIN_MAP_THEMES,
   builtinTheme,
+  envSky,
   isBuiltinMapId,
   themeForDoc,
   type BuiltinMapId,
@@ -317,6 +318,7 @@ export class ArenaScene {
   private buildStage(): void {
     this.stage = new MapStage(this.scene, this.materials, {
       base: this.mapDoc?.base ?? (isBuiltinMapId(this.mapId) ? this.mapId : 'jaddy'),
+      env: this.mapDoc?.env,
       interactive: true,
     });
     this.stage.build();
@@ -365,10 +367,11 @@ export class ArenaScene {
 
   private applyTheme(): void {
     const theme = this.mapDoc ? themeForDoc(this.mapDoc) : builtinTheme(this.mapId);
-    const sky = Color3.FromHexString(theme.sky);
+    const backdrop = envSky(theme, this.mapDoc?.env);
+    const sky = Color3.FromHexString(backdrop.sky);
     this.scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
-    this.scene.fogColor = Color3.FromHexString(theme.fog);
-    this.scene.fogDensity = theme.fogDensity;
+    this.scene.fogColor = Color3.FromHexString(backdrop.fog);
+    this.scene.fogDensity = backdrop.fogDensity;
     if (this.hemi) {
       this.hemi.diffuse = Color3.FromHexString(theme.hemiDiffuse);
       this.hemi.groundColor = Color3.FromHexString(theme.hemiGround);
