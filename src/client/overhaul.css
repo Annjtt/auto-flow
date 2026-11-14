@@ -1360,7 +1360,7 @@ body[data-map='jaddy'] { --map-accent: #7de09a; }
   position: absolute;
   top: 74px;
   left: 20px;
-  z-index: 18;
+  z-index: 10;
   width: 258px;
   max-height: none;
   border: 1px solid var(--hud-border);
@@ -2716,6 +2716,7 @@ body:not(.in-game) .connection-badge { display: none; }
   left: 0;
   right: 0;
   z-index: 6;
+  margin-bottom: 1%;
   display: flex;
   align-items: center;
   gap: clamp(8px, 1.4vw, 14px);
@@ -3038,7 +3039,7 @@ body:not(.in-game) .connection-badge { display: none; }
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: clamp(10px, 2vh, 18px);
+  gap: clamp(25px, 4vh, 38px);
   margin: 0;
   pointer-events: auto;
 }
@@ -3747,9 +3748,9 @@ body:not(.in-game) .connection-badge { display: none; }
   .auth-field input { padding: 8px 11px; font-size: 14px; }
   .auth-submit { padding: 9px 16px; }
 
-  .menu-hud-top { top: 8px; }
+  .menu-hud-top { top: 4%; }
   .menu-hud-bottom { bottom: 8px; }
-  .menu-center { padding-top: 68px; padding-bottom: 58px; gap: clamp(18px, 4vw, 40px); }
+  .menu-center { padding-top: 68px; padding-bottom: 58px; gap: clamp(38px, 4vw, 40px); }
   .menu-orb::after { inset: 3px; }
   .menu-action-orb { width: clamp(44px, min(8vw, 10vh), 56px); border-radius: 7px; }
   .play-cluster { width: clamp(122px, min(23vw, 31vh), 168px); }
@@ -3779,7 +3780,7 @@ body:not(.in-game) .connection-badge { display: none; }
 }
 
 @media (max-width: 920px) and (orientation: landscape) {
-  .menu-center { gap: 26px; }
+  .menu-center { gap: 36px; }
   .browser-layout { grid-template-columns: 190px minmax(0, 1fr); }
   .lobby-grid { grid-template-columns: minmax(168px, 30%) minmax(0, 1fr); }
   .lobby-rules { display: none; }
@@ -3910,8 +3911,8 @@ body:not(.in-game) .connection-badge { display: none; }
   #rulesBtn { display: none; }
   .icon-btn.close { width: 26px; height: 26px; }
 
-  .players-panel { left: 8px; right: auto; top: 64px; width: calc(50vw - 13px); max-height: 208px; }
-  .synergy-panel { right: 8px; left: auto; top: 64px; width: calc(50vw - 13px); max-height: 208px; }
+  .players-panel { left: 8px; right: auto; top: 64px; width: calc(50vw - 13px); max-height: 300px; }
+  .synergy-panel { right: 8px; left: auto; top: 64px; width: calc(50vw - 13px); max-height: 300px; }
   .panel-head { padding: 7px 9px; }
   .leader-list, .synergy-list { max-height: 176px; }
   .leader-row { grid-template-columns: 12px 20px minmax(0, 1fr); gap: 5px; padding: 5px 4px; }
@@ -4007,7 +4008,7 @@ body:not(.in-game) .connection-badge { display: none; }
   .chud-icon { width: 27px; height: 27px; }
   .icon-btn.close { width: 26px; height: 26px; font-size: 11px; }
 
-  .players-panel { top: 58px; width: 178px; max-height: min(calc(100dvh - 76px), 240px); }
+  .players-panel { top: 58px; width: 178px; max-height: min(calc(100dvh - 76px), 300px); }
   .synergy-panel { top: 58px; width: 176px; max-height: min(calc(100dvh - 76px), 240px); }
   .panel-head { padding: 6px 9px; font-size: 7px; }
   .leader-list, .synergy-list { flex: 1; min-height: 0; max-height: none; overflow-y: auto; }
@@ -4115,17 +4116,15 @@ body:not(.in-game) .connection-badge { display: none; }
   .chud-icon { width: 25px; height: 25px; border-radius: 8px; }
   .chud-xp { min-width: 78px; gap: 4px; }
 
-  .players-panel { top: 50px; width: 166px; max-height: min(calc(100dvh - 70px), 190px); }
+  .players-panel { top: 50px; width: 166px; max-height: min(calc(100dvh - 70px), 300px); }
   .synergy-panel { top: 50px; width: 162px; max-height: min(calc(100dvh - 70px), 190px); }
   .leader-list, .synergy-list { max-height: none; flex: 1; min-height: 0; }
-  .leader-row { padding: 3px 4px; }
+  .leader-row { padding: 5px 3px; }
   .leader-avatar { width: 20px; height: 20px; font-size: 9px; }
-  .leader-hp { display: none; }
   .leader-lives { font-size: 9px; }
   .synergy-item { padding: 4px 5px; }
   .syn-icon { width: 18px; height: 18px; }
   .syn-icon .trait-icon { width: 12px; height: 12px; }
-  .syn-bar { display: none; }
   .syn-line b { font-size: 9px; }
 
   .shop-bar { bottom: 92px; }
@@ -4152,7 +4151,7 @@ body:not(.in-game) .connection-badge { display: none; }
   .menu-head { padding-bottom: 8px; }
   .menu-hero h1 { font-size: 26px; }
   .hero-copy { display: none; }
-  .menu-center { padding-top: 70px; padding-bottom: 50px; gap: 24px; }
+  .menu-center { padding-top: 70px; padding-bottom: 50px; gap: 34px; }
   .menu-action-orb { width: 44px; }
   .play-cluster { width: clamp(112px, 30vh, 146px); }
   .profile-block { width: 50px; }
