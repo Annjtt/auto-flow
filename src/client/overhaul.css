@@ -3017,7 +3017,6 @@ body:not(.in-game) .connection-badge { display: none; }
 .menu-orb { --glyph-size: clamp(24px, 3.2vw, 33px); }
 .menu-orb.small { --glyph-size: clamp(18px, 2.4vw, 23px); }
 .menu-orb.tiny { --glyph-size: 15px; }
-.play-orb { --glyph-size: clamp(38px, 5.6vw, 60px); }
 
 .menu-center {
   position: absolute;
@@ -3093,6 +3092,7 @@ body:not(.in-game) .connection-badge { display: none; }
   aspect-ratio: 1;
   display: grid;
   place-items: center;
+  pointer-events: auto;
 }
 
 .play-ring {
@@ -3134,7 +3134,10 @@ body:not(.in-game) .connection-badge { display: none; }
     0 0 0 6px rgba(240, 224, 190, 0.08),
     0 0 42px color-mix(in srgb, var(--hud-gold) 26%, transparent),
     0 22px 44px rgba(0, 0, 0, 0.55);
-  transition: transform 0.16s, box-shadow 0.16s;
+  transition:
+    width 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.26s ease,
+    box-shadow 0.26s ease;
 }
 
 .play-orb::after {
@@ -3147,17 +3150,26 @@ body:not(.in-game) .connection-badge { display: none; }
 }
 
 .play-orb:hover {
-  transform: translateY(-2px) scale(1.015);
+  width: 76%;
+  border-color: #ffe9b3;
   box-shadow:
     0 0 0 5px rgba(0, 0, 0, 0.4),
-    0 0 0 6px color-mix(in srgb, var(--hud-gold) 42%, transparent),
-    0 0 64px color-mix(in srgb, var(--hud-gold) 36%, transparent),
-    0 26px 52px rgba(0, 0, 0, 0.58);
+    0 0 0 6px color-mix(in srgb, var(--hud-gold) 46%, transparent),
+    0 0 64px color-mix(in srgb, var(--hud-gold) 38%, transparent),
+    0 22px 44px rgba(0, 0, 0, 0.55);
 }
 
-.play-orb:active { transform: scale(0.975); }
+.play-orb:active {
+  box-shadow:
+    0 0 0 5px rgba(0, 0, 0, 0.4),
+    0 0 0 6px color-mix(in srgb, var(--hud-gold) 30%, transparent),
+    0 0 34px color-mix(in srgb, var(--hud-gold) 22%, transparent),
+    0 12px 26px rgba(0, 0, 0, 0.5);
+}
 
 .play-orb .orb-glyph {
+  width: 35%;
+  height: auto;
   color: #fff4d6;
   filter: drop-shadow(0 0 24px rgba(246, 223, 164, 0.55));
 }
@@ -3795,6 +3807,9 @@ body:not(.in-game) .connection-badge { display: none; }
   .rail-tip { display: none; }
   .players-panel { width: 196px; }
   .synergy-panel { width: 188px; }
+  .chud-stat { min-width: 62px; }
+  .chud-stat small { display: none; }
+  .chud-xp { min-width: 100px; }
   .leader-name { font-size: 9.5px; }
   .leader-row { grid-template-columns: 14px 26px minmax(0, 1fr); gap: 6px; }
   .leader-avatar { width: 26px; height: 26px; font-size: 11px; }
@@ -3956,6 +3971,17 @@ body:not(.in-game) .connection-badge { display: none; }
   .screen-top .screen-title { text-align: left; }
   .screen-top .screen-side { align-items: flex-start; margin-right: 0; }
   .settings-panel .settings-grid { grid-template-columns: 1fr; }
+}
+
+/* ---------- Very narrow portraits ---------- */
+
+@media (max-width: 480px) {
+  #hudPhaseLabel { display: none; }
+  .round-phase { padding: 0 6px; }
+  .chud-stat { min-width: 46px; }
+  .chud-xp { flex: 0 0 auto; min-width: 0; }
+  .chud-xp-meter { display: none; }
+  .opponent-line { display: none; }
 }
 
 /* ---------- Short viewports (landscape phones, split screens) ---------- */
