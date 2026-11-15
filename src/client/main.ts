@@ -189,6 +189,9 @@ let phaseSig = '';
 let oddsSig = '';
 let currentMap: MapId = loadMap();
 let shopOpen = false;
+let matchLoading = false;
+let loadTimer = 0;
+let loadStartedAt = 0;
 
 const playerNameInput = byId<HTMLInputElement>('playerName');
 const codeInput = byId<HTMLInputElement>('codeInput');
@@ -249,6 +252,10 @@ const authAvatarGrid = byId('authAvatarGrid');
 const authMessage = byId('authMessage');
 const menuCanvas = byId<HTMLCanvasElement>('menuCanvas');
 let menuBackdrop: MenuBackdrop | null = null;
+
+const matchLoader = byId('matchLoader');
+const loadRoster = byId('loadRoster');
+const loadBar = byId('loadBar');
 
 const storedName = localStorage.getItem('autoflow.name') ?? '';
 playerNameInput.value = storedName;
@@ -491,8 +498,109 @@ function handleServerMessage(message: ServerMessage): void {
   }
 }
 
+const LOADING_MIN_MS = 2400;
+
+function avatarForName(seed: string): AvatarDef {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash = Math.imul(hash ^ seed.charCodeAt(i), 16777619) >>> 0;
+  }
+  return AVATARS[hash % AVATARS.length];
+}
+
+function loadCardMarkup(player: RoomView['players'][number], isSelf: boolean): string {
+  const avatar = isSelf ? avatarById(storedAvatarId()) : avatarForName(`${player.name}#${player.id}`);
+  const name = escapeHtml(player.name);
+  const level = player.isBot ? `Бот · ур. ${player.level}` : `Уровень ${player.level}`;
+  return `
+    <article class="load-card${isSelf ? ' is-self' : ''}" style="--tone:${avatar.tone}">
+      <div class="load-card-art" aria-hidden="true">
+        <span class="load-card-glyph">${avatar.glyph}</span>
+        <span class="load-card-hero">${name}</span>
+      </div>
+      <div class="load-card-plate">
+        <span class="load-card-avatar" aria-hidden="true">${avatar.glyph}</span>
+        <span class="load-card-meta">
+          <b class="load-card-name">${name}</b>
+          <span class="load-card-level">${level}</span>
+        </span>
+        ${isSelf ? '<span class="load-card-tag">вы</span>' : ''}
+      </div>
+    </article>`;
+}
+
+function renderMatchRoster(): void {
+  if (!room) return;
+  const selfId = room.selfId;
+  const ordered = room.players.filter((player) => player.id !== selfId);
+  const self = room.players.find((player) => player.id === selfId);
+  if (self) ordered.push(self);
+  const total = Math.max(ordered.length, 2);
+  loadRoster.style.setProperty('--cols', String(Math.ceil(total / 2)));
+  loadRoster.innerHTML = ordered.map((player) => loadCardMarkup(player, player.id === selfId)).join('');
+}
+
+function setLoadProgress(value: number): void {
+  const clamped = Math.max(0, Math.min(1, value));
+  loadBar.style.width = `${(clamped * 100).toFixed(1)}%`;
+}
+
+function startMatchLoading(): void {
+  if (!room || matchLoading) return;
+  matchLoading = true;
+  loadStartedAt = performance.now();
+  matchLoader.classList.remove('hidden', 'leaving');
+  document.body.classList.add('is-match-loading');
+  showScreen('menu');
+  renderMatchRoster();
+  setLoadProgress(0);
+  window.clearInterval(loadTimer);
+  const step = (): void => {
+    if (!matchLoading) {
+      window.clearInterval(loadTimer);
+      return;
+    }
+    const t = Math.min(1, (performance.now() - loadStartedAt) / LOADING_MIN_MS);
+    setLoadProgress(1 - Math.pow(1 - t, 2.2));
+    if (t >= 1) {
+      window.clearInterval(loadTimer);
+      finishMatchLoading();
+    }
+  };
+  loadTimer = window.setInterval(step, 70);
+}
+
+function finishMatchLoading(): void {
+  if (!matchLoading) return;
+  matchLoading = false;
+  setLoadProgress(1);
+  document.body.classList.remove('is-match-loading');
+  showScreen('game');
+  if (room) {
+    renderGame();
+    syncScene();
+  }
+  matchLoader.classList.add('leaving');
+  window.setTimeout(() => {
+    matchLoader.classList.add('hidden');
+    matchLoader.classList.remove('leaving');
+    setLoadProgress(0);
+  }, 520);
+}
+
+function cancelMatchLoading(): void {
+  if (!matchLoading) return;
+  matchLoading = false;
+  window.clearInterval(loadTimer);
+  matchLoader.classList.add('hidden');
+  matchLoader.classList.remove('leaving');
+  document.body.classList.remove('is-match-loading');
+  setLoadProgress(0);
+}
+
 function handleRoom(nextRoom: RoomView): void {
   const previous = room;
+  const enteringMatch = nextRoom.phase !== 'waiting' && (!previous || previous.phase === 'waiting');
   room = nextRoom;
   lastRoomAt = Date.now();
   if (drag && (nextRoom.phase !== 'prep' || !nextRoom.self?.alive)) cancelDrag();
@@ -505,6 +613,7 @@ function handleRoom(nextRoom: RoomView): void {
   if (nextRoom.self && !nextRoom.self.alive) selectedUid = null;
 
   if (nextRoom.phase === 'waiting') {
+    cancelMatchLoading();
     battle = null;
     showScreen('lobby');
     renderLobby();
@@ -520,6 +629,16 @@ function handleRoom(nextRoom: RoomView): void {
     shopOpen = false;
   }
   document.body.dataset.phase = nextRoom.phase;
+
+  if (enteringMatch) startMatchLoading();
+
+  if (matchLoading) {
+    // The loader covers the screen until the progress bar fills up. The game
+    // state is updated in the background so the reveal is instant.
+    renderGame();
+    syncScene();
+    return;
+  }
 
   showScreen('game');
   renderGame();
@@ -546,6 +665,7 @@ function handleRoom(nextRoom: RoomView): void {
 
 function resetToMenu(): void {
   cancelDrag();
+  cancelMatchLoading();
   room = null;
   battle = null;
   selectedUid = null;
@@ -1753,6 +1873,9 @@ function showGameOver(
 ): void {
   if (gameOverShown) return;
   gameOverShown = true;
+  const wasLoading = matchLoading;
+  cancelMatchLoading();
+  if (wasLoading) showScreen('game');
   grantMatchXp(placement);
   if (reason === 'surrender') {
     gameOverTitle.textContent = 'Вы сдались';

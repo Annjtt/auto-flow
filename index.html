@@ -11,6 +11,7 @@
     <link rel="preload" href="/fonts/onest-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/img/win.png" as="image" />
     <link rel="preload" href="/img/loss.png" as="image" />
+    <link rel="preload" href="/img/effects/loading.gif" as="image" />
     <link rel="stylesheet" href="/src/client/fonts.css" />
     <link rel="stylesheet" href="/src/client/style.css" />
     <link rel="stylesheet" href="/src/client/overhaul.css" />
@@ -75,10 +76,12 @@
 
         <div class="menu-center">
           <div class="menu-actions menu-actions-left">
-            <button id="menuModesBtn" class="menu-orb menu-action-orb" type="button" aria-label="Режимы игры" title="Режимы игры">
+            <button id="menuModesBtn" class="menu-orb menu-action-orb" type="button" aria-label="Режим игры" title="Режим игры">
+              <span class="menu-action-label" aria-hidden="true">Режим игры</span>
               <span class="orb-glyph modes" aria-hidden="true"></span>
             </button>
             <button id="menuNetworkBtn" class="menu-orb menu-action-orb" type="button" aria-label="Сетевая игра" title="Сетевая игра">
+              <span class="menu-action-label" aria-hidden="true">Сетевая игра</span>
               <span class="orb-glyph network" aria-hidden="true"></span>
             </button>
           </div>
@@ -94,10 +97,12 @@
           <div class="menu-actions menu-actions-right">
             <button id="menuShopBtn" class="menu-orb menu-action-orb" type="button" aria-label="Магазин" title="Магазин">
               <span class="orb-glyph shop" aria-hidden="true"></span>
+              <span class="menu-action-label" aria-hidden="true">Магазин</span>
               <span class="menu-soon" aria-hidden="true"></span>
             </button>
             <button id="menuInventoryBtn" class="menu-orb menu-action-orb" type="button" aria-label="Инвентарь" title="Инвентарь">
               <span class="orb-glyph inventory" aria-hidden="true"></span>
+              <span class="menu-action-label" aria-hidden="true">Инвентарь</span>
               <span class="menu-soon" aria-hidden="true"></span>
             </button>
           </div>
@@ -124,13 +129,13 @@
 
           <div class="browser-layout">
             <aside class="browser-side panel">
+              <button class="btn browser-create" data-open-screen="create" type="button">Создать лобби</button>
               <div class="join-card">
                 <div class="join-row">
                   <input id="codeInput" maxlength="5" placeholder="КОД" spellcheck="false" />
                   <button id="joinBtn" class="btn btn-primary" type="button">Войти</button>
                 </div>
               </div>
-              <button class="btn browser-create" data-open-screen="create" type="button">Создать лобби</button>
               <div class="browser-profile">
                 <span id="playAvatarGlyph" class="avatar-glyph" aria-hidden="true">♞</span>
                 <div>
@@ -416,6 +421,16 @@
     <div id="toasts" class="toasts"></div>
     <div id="tooltip" class="tooltip hidden"></div>
     <div id="modalRoot"></div>
+
+    <div id="matchLoader" class="match-loader hidden" role="status" aria-live="polite" aria-label="Загрузка матча">
+      <div class="load-stage">
+        <div id="loadRoster" class="load-roster"></div>
+      </div>
+      <div class="load-footer">
+        <div class="load-track" aria-hidden="true"><i id="loadBar" class="load-bar"></i></div>
+        <img class="load-gif" src="/img/effects/loading.gif" alt="" width="48" height="48" />
+      </div>
+    </div>
 
     <script type="module" src="/src/client/main.ts"></script>
   </body>
