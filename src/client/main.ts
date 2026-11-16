@@ -168,6 +168,62 @@ function avatarStyle(id: string): string {
   return `--avatar-tone:${avatarById(id).tone}`;
 }
 
+const AVATAR_PHOTO_KEY = 'autoflow.avatarPhoto';
+const AVATAR_PHOTO_SIZE = 256;
+
+function storedAvatarPhoto(): string {
+  const raw = localStorage.getItem(AVATAR_PHOTO_KEY);
+  return raw && raw.startsWith('data:image/') ? raw : '';
+}
+
+function saveAvatarPhoto(dataUrl: string): void {
+  if (!dataUrl) {
+    localStorage.removeItem(AVATAR_PHOTO_KEY);
+    return;
+  }
+  try {
+    localStorage.setItem(AVATAR_PHOTO_KEY, dataUrl);
+  } catch {
+    toast('Не удалось сохранить фото: в хранилище нет места.', 'error');
+  }
+}
+
+/** Center-crops the picked file into a square and shrinks it to the preset avatar size. */
+function shrinkAvatarFile(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) return Promise.reject(new Error('not an image'));
+  const url = URL.createObjectURL(file);
+  const load = new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('broken image'));
+    image.src = url;
+  });
+  return load
+    .then((image) => {
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      if (!side) throw new Error('empty image');
+      const canvas = document.createElement('canvas');
+      canvas.width = AVATAR_PHOTO_SIZE;
+      canvas.height = AVATAR_PHOTO_SIZE;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('no canvas');
+      ctx.drawImage(
+        image,
+        (image.naturalWidth - side) / 2,
+        (image.naturalHeight - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        AVATAR_PHOTO_SIZE,
+        AVATAR_PHOTO_SIZE,
+      );
+      const webp = canvas.toDataURL('image/webp', 0.86);
+      return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/jpeg', 0.9);
+    })
+    .finally(() => URL.revokeObjectURL(url));
+}
+
 let room: RoomView | null = null;
 let battle: BattleSnapshot | null = null;
 let selectedUid: string | null = null;
@@ -242,6 +298,7 @@ const playNameLabel = byId('playNameLabel');
 const playMapName = byId('playMapName');
 const playAvatarGlyph = byId('playAvatarGlyph');
 const menuAvatarGlyph = byId('menuAvatarGlyph');
+const menuAvatarIcon = byId('menuAvatarIcon');
 const menuLevelValue = byId('menuLevelValue');
 const menuXpFill = byId('menuXpFill');
 const mapCurrentName = byId('mapCurrentName');
@@ -348,10 +405,19 @@ function syncMapLabels(): void {
 
 function syncAvatarUI(): void {
   const avatar = avatarById(storedAvatarId());
-  for (const glyph of [menuAvatarGlyph, playAvatarGlyph]) {
-    glyph.textContent = avatar.glyph;
-    glyph.style.setProperty('--avatar-tone', avatar.tone);
+  const photo = storedAvatarPhoto();
+  for (const host of [menuAvatarGlyph, playAvatarGlyph]) {
+    host.innerHTML = photo
+      ? `<img class="avatar-photo" src="${photo}" alt="" draggable="false" />`
+      : escapeHtml(avatar.glyph);
+    host.style.setProperty('--avatar-tone', avatar.tone);
+    host.classList.toggle('has-photo', Boolean(photo));
   }
+  // The small badge next to the profile shows the icon used in the leaderboard.
+  menuAvatarIcon.textContent = avatar.glyph;
+  menuAvatarIcon.style.setProperty('--avatar-tone', avatar.tone);
+  playersSig = '';
+  if (room) renderPlayers();
 }
 
 const XP_PER_LEVEL = 100;
@@ -381,7 +447,14 @@ function syncNameLabels(): void {
 }
 
 function selectMap(id: MapId): void {
-  if (id === currentMap) return;
+  const doc = getCustomMap(id);
+  if (id === currentMap) {
+    // Re-apply even for the same id: the custom map may have been edited in
+    // Map Lab, and the backdrop would otherwise keep the cached build.
+    scene.setMap(id, doc);
+    menuBackdrop?.setMap(id, doc);
+    return;
+  }
   currentMap = id;
   localStorage.setItem('autoflow.map', currentMap);
   scene.setMap(currentMap, getCustomMap(currentMap));
@@ -389,6 +462,35 @@ function selectMap(id: MapId): void {
   syncMapLabels();
   renderMapGrid();
   toast(`Доска: ${mapOption(currentMap).name}`, 'success');
+}
+
+let mapsRefreshedAt = 0;
+
+function mapDocsSignature(): string {
+  return JSON.stringify(getCustomMaps());
+}
+
+/**
+ * Re-reads published custom maps and rebuilds the menu backdrop / arena board
+ * when their content changed (e.g. after editing in Map Lab). Without this the
+ * menu kept rendering the copy that was fetched at boot.
+ */
+async function refreshCustomMaps(): Promise<void> {
+  const now = performance.now();
+  if (now - mapsRefreshedAt < 700) return;
+  mapsRefreshedAt = now;
+  const before = mapDocsSignature();
+  await loadMapsFromServer();
+  if (mapDocsSignature() === before) return;
+  mergeCustomMapOptions();
+  if (!MAP_OPTIONS.some((entry) => entry.id === currentMap)) {
+    currentMap = MAP_OPTIONS[0].id;
+    localStorage.setItem('autoflow.map', currentMap);
+  }
+  scene.setMap(currentMap, getCustomMap(currentMap));
+  menuBackdrop?.setMap(currentMap, getCustomMap(currentMap));
+  syncMapLabels();
+  renderMapGrid();
 }
 
 function setShopOpen(open: boolean): void {
@@ -498,7 +600,25 @@ function handleServerMessage(message: ServerMessage): void {
   }
 }
 
-const LOADING_MIN_MS = 2400;
+// Long enough to actually look at the opponent portraits before the match.
+const LOADING_MIN_MS = 5600;
+
+/** Bot portraits live in /img/bot/webp/<file>.webp and are keyed by bot name. */
+const BOT_PORTRAITS: Record<string, string> = {
+  'Морн': 'Morn',
+  'Ксил': 'Xyl',
+  'Ржавый': 'Rusty',
+  'Игнис': 'Ignis',
+  'Селена': 'Selena',
+  'Гром': 'Thunder',
+  'Векс': 'Vex',
+  'Тень': 'Shadow',
+};
+
+function portraitFor(name: string): string | null {
+  const file = BOT_PORTRAITS[name];
+  return file ? `/img/bot/webp/${file}.webp` : null;
+}
 
 function avatarForName(seed: string): AvatarDef {
   let hash = 2166136261;
@@ -512,10 +632,14 @@ function loadCardMarkup(player: RoomView['players'][number], isSelf: boolean): s
   const avatar = isSelf ? avatarById(storedAvatarId()) : avatarForName(`${player.name}#${player.id}`);
   const name = escapeHtml(player.name);
   const level = player.isBot ? `Бот · ур. ${player.level}` : `Уровень ${player.level}`;
+  const portrait = isSelf ? storedAvatarPhoto() : player.isBot ? portraitFor(player.name) : null;
+  const art = portrait
+    ? `<img class="load-card-portrait" src="${portrait}" alt="" decoding="async" />`
+    : `<span class="load-card-glyph">${avatar.glyph}</span>`;
   return `
     <article class="load-card${isSelf ? ' is-self' : ''}" style="--tone:${avatar.tone}">
-      <div class="load-card-art" aria-hidden="true">
-        <span class="load-card-glyph">${avatar.glyph}</span>
+      <div class="load-card-art${portrait ? ' has-portrait' : ''}" aria-hidden="true">
+        ${art}
         <span class="load-card-hero">${name}</span>
       </div>
       <div class="load-card-plate">
@@ -529,6 +653,16 @@ function loadCardMarkup(player: RoomView['players'][number], isSelf: boolean): s
     </article>`;
 }
 
+function revealLoadedPortraits(): void {
+  for (const image of loadRoster.querySelectorAll<HTMLImageElement>('.load-card-portrait')) {
+    if (image.complete && image.naturalWidth > 0) {
+      image.classList.add('loaded');
+      continue;
+    }
+    image.addEventListener('load', () => image.classList.add('loaded'), { once: true });
+  }
+}
+
 function renderMatchRoster(): void {
   if (!room) return;
   const selfId = room.selfId;
@@ -538,6 +672,7 @@ function renderMatchRoster(): void {
   const total = Math.max(ordered.length, 2);
   loadRoster.style.setProperty('--cols', String(Math.ceil(total / 2)));
   loadRoster.innerHTML = ordered.map((player) => loadCardMarkup(player, player.id === selfId)).join('');
+  revealLoadedPortraits();
 }
 
 function setLoadProgress(value: number): void {
@@ -561,7 +696,9 @@ function startMatchLoading(): void {
       return;
     }
     const t = Math.min(1, (performance.now() - loadStartedAt) / LOADING_MIN_MS);
-    setLoadProgress(1 - Math.pow(1 - t, 2.2));
+    // A near-linear crawl: the bar keeps visibly moving for the whole wait
+    // instead of snapping to ~90% and then sitting there.
+    setLoadProgress(Math.pow(t, 0.85));
     if (t >= 1) {
       window.clearInterval(loadTimer);
       finishMatchLoading();
@@ -1020,7 +1157,9 @@ function updateClock(): void {
 function renderPlayers(): void {
   if (!room) return;
   const maxLives = Math.max(1, room.settings.startingLives);
-  const sig = `${room.selfId}|${maxLives}|${room.opponentId ?? ''}|${JSON.stringify(room.players)}`;
+  const sig = `${room.selfId}|${maxLives}|${room.opponentId ?? ''}|${storedAvatarId()}|${
+    storedAvatarPhoto() ? 'photo' : 'glyph'
+  }|${JSON.stringify(room.players)}`;
   if (sig === playersSig) return;
   playersSig = sig;
   const players = [...room.players].sort((a, b) => {
@@ -1047,11 +1186,21 @@ function renderPlayers(): void {
           : player.streak < 0
             ? `<span class="leader-streak cold" title="Серия поражений: ${Math.abs(player.streak)}">▼ ${Math.abs(player.streak)}</span>`
             : '';
-      const initial = escapeHtml(player.name.slice(0, 1).toUpperCase() || '?');
+      const isSelf = player.id === room?.selfId;
+      // The local player shows the avatar picked in the profile (photo first,
+      // then the selected icon); bots show their official portraits.
+      const photo = isSelf ? storedAvatarPhoto() : player.isBot ? portraitFor(player.name) : null;
+      const leaderAvatar = photo
+        ? `<span class="leader-avatar has-photo"><img class="leader-photo" src="${photo}" alt="" decoding="async" /></span>`
+        : `<span class="leader-avatar" style="${avatarStyle(
+            isSelf ? storedAvatarId() : avatarForName(`${player.name}#${player.id}`).id,
+          )}"><b class="leader-icon">${
+            isSelf ? avatarById(storedAvatarId()).glyph : avatarForName(`${player.name}#${player.id}`).glyph
+          }</b></span>`;
       return `
         <div class="${classes.join(' ')}" data-player-id="${escapeHtml(player.id)}" data-streak="${Math.min(8, Math.max(0, player.streak))}">
           <span class="leader-rank ${rank === 1 ? 'first' : ''}">${rank}</span>
-          <span class="leader-avatar">${initial}</span>
+          ${leaderAvatar}
           <div class="leader-main">
             <div class="leader-line">
               <b class="leader-name">${escapeHtml(player.name)}</b>
@@ -1602,6 +1751,7 @@ function setupAuth(): void {
 function openSettingsModal(): void {
   const selected = storedAvatarId();
   let selectedAvatar = selected;
+  let pendingPhoto = storedAvatarPhoto();
   const avatar = avatarById(selected);
   const currentMapName = mapOption(currentMap).name;
   modalRoot.innerHTML = `
@@ -1615,9 +1765,15 @@ function openSettingsModal(): void {
         </header>
         <div class="settings-modal-grid">
           <section class="settings-profile">
-            <div class="settings-avatar-preview" id="settingsAvatarPreview" style="${avatarStyle(selected)}">
-              <span>${avatar.glyph}</span>
+            <div class="settings-avatar-preview${pendingPhoto ? ' has-photo' : ''}" id="settingsAvatarPreview" style="${avatarStyle(selected)}">
+              ${pendingPhoto ? `<img class="avatar-photo" src="${pendingPhoto}" alt="" />` : `<span>${avatar.glyph}</span>`}
             </div>
+            <div class="settings-avatar-upload">
+              <input id="settingsAvatarFile" class="visually-hidden" type="file" accept="image/*" />
+              <button class="btn" id="settingsAvatarUpload" type="button">Загрузить фото</button>
+              <button class="btn" id="settingsAvatarReset" type="button"${pendingPhoto ? '' : ' disabled'}>Убрать фото</button>
+            </div>
+            <p class="settings-avatar-hint">Фото обрезается по центру и показывается в профиле и на экране загрузки. Значок ниже — иконка в таблице лидеров.</p>
             <label class="form-field">
               <span>Позывной</span>
               <input id="settingsNameInput" maxlength="18" autocomplete="nickname" value="${escapeHtml(playerNameInput.value || 'Странник')}" />
@@ -1661,14 +1817,24 @@ function openSettingsModal(): void {
   const grid = byId('settingsAvatarGrid');
   const preview = byId('settingsAvatarPreview');
   const nameInput = byId<HTMLInputElement>('settingsNameInput');
+  const fileInput = byId<HTMLInputElement>('settingsAvatarFile');
+  const resetPhotoBtn = byId<HTMLButtonElement>('settingsAvatarReset');
+
+  const renderPreview = (): void => {
+    const chosen = avatarById(selectedAvatar);
+    preview.style.setProperty('--avatar-tone', chosen.tone);
+    preview.classList.toggle('has-photo', Boolean(pendingPhoto));
+    preview.innerHTML = pendingPhoto
+      ? `<img class="avatar-photo" src="${pendingPhoto}" alt="" />`
+      : `<span>${chosen.glyph}</span>`;
+    resetPhotoBtn.disabled = !pendingPhoto;
+  };
 
   grid.addEventListener('click', (event) => {
     const target = (event.target as HTMLElement).closest('[data-settings-avatar]') as HTMLElement | null;
     if (!target?.dataset.settingsAvatar) return;
     selectedAvatar = target.dataset.settingsAvatar;
-    const chosen = avatarById(selectedAvatar);
-    preview.style.setProperty('--avatar-tone', chosen.tone);
-    preview.innerHTML = `<span>${chosen.glyph}</span>`;
+    renderPreview();
     for (const button of grid.querySelectorAll<HTMLElement>('[data-settings-avatar]')) {
       const active = button.dataset.settingsAvatar === selectedAvatar;
       button.classList.toggle('selected', active);
@@ -1676,10 +1842,28 @@ function openSettingsModal(): void {
     }
   });
 
+  byId('settingsAvatarUpload').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    if (!file) return;
+    shrinkAvatarFile(file)
+      .then((dataUrl) => {
+        pendingPhoto = dataUrl;
+        renderPreview();
+      })
+      .catch(() => toast('Не удалось прочитать изображение.', 'error'));
+  });
+  resetPhotoBtn.addEventListener('click', () => {
+    pendingPhoto = '';
+    renderPreview();
+  });
+
   const close = (): void => closeModal();
   byId('closeSettings').addEventListener('click', close);
   byId('cancelSettings').addEventListener('click', close);
   byId('saveSettings').addEventListener('click', () => {
+    saveAvatarPhoto(pendingPhoto);
     commitProfile(nameInput.value, selectedAvatar);
     closeModal();
     toast('Настройки сохранены.', 'success');
