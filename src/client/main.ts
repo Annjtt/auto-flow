@@ -509,9 +509,17 @@ function showScreen(name: ScreenName): void {
   document.body.classList.toggle('in-game', name === 'game');
   document.body.classList.toggle('in-menu', name === 'menu' || name === 'auth');
   if (name === 'game') scene.show();
-  if (name === 'map') renderMapGrid();
-  if (name === 'menu') menuBackdrop?.show();
-  else menuBackdrop?.hide();
+  if (name === 'map') {
+    renderMapGrid();
+    void refreshCustomMaps();
+  }
+  if (name === 'menu') {
+    menuBackdrop?.show();
+    // Custom maps may have been re-published in Map Lab while we were away.
+    void refreshCustomMaps();
+  } else {
+    menuBackdrop?.hide();
+  }
 }
 
 function currentName(): string {
@@ -2459,6 +2467,15 @@ document.addEventListener('click', (event) => {
 });
 
 window.setInterval(updateClock, 200);
+
+// Map Lab publishes maps through /api/maps. Refresh when the window regains
+// focus so the menu backdrop never keeps a stale build of the selected map.
+window.addEventListener('focus', () => {
+  void refreshCustomMaps();
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void refreshCustomMaps();
+});
 
 if (storedName) {
   playerNameInput.value = storedName;

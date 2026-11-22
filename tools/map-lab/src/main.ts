@@ -1,15 +1,23 @@
 import {
   BUILTIN_MAP_META,
   BUILTIN_MAP_THEMES,
+  MAP_ANIMATION_LIMITS,
+  MAP_ANIM_PROPERTIES,
+  MAP_ANIM_WAVES,
   MAP_BASE_OPTIONS,
   MAP_SHAPES,
   baseSubtitle,
   baseTheme,
+  cloneMapObject,
+  createAnimationTrack,
   createEmptyMapDoc,
   createMapEnvSurface,
   createMapObject,
+  createMapObjectGroup,
+  createObjectAnimation,
   duplicateMapDoc,
   emptyMapEnv,
+  groupOfObject,
   isBuiltinMapId,
   mapMeta,
   normalizeMapDoc,
@@ -17,14 +25,19 @@ import {
   slugifyMapId,
   themeForDoc,
   type BuiltinMapId,
+  type MapAnimProperty,
+  type MapAnimationTrack,
   type MapBase,
   type MapDoc,
   type MapObject,
+  type MapObjectAnimation,
+  type MapObjectGroup,
   type MapShape,
   type MapTheme,
   type Vec3,
 } from '../../../src/shared/maps';
 import {
+  createPresetId,
   escapeHtml,
   formatNumber,
   loadSavedState,
@@ -32,6 +45,7 @@ import {
   round,
   saveState,
   type MapLabState,
+  type MapPreset,
 } from './mapLabData';
 import { MapPreview, type GizmoMode } from './mapPreview';
 
@@ -99,18 +113,23 @@ function cloneTheme(theme: MapTheme): MapTheme {
 let state: MapLabState = loadSavedState();
 let selectedMapId: string | null = state.selectedId;
 let selectedObjectId: string | null = null;
+let selectedIds: string[] = [];
+let selectedGroupId: string | null = null;
 let tab: 'map' | 'object' = 'map';
 let gizmoMode: GizmoMode = 'move';
 let placementShape: MapShape | null = null;
 let snapEnabled = true;
 let snapStep = 0.25;
 let searchQuery = '';
+let objectSearchQuery = '';
 let builtinPreview: MapDoc | null = null;
 let saveTimer: number | null = null;
 let toastTimer: number | null = null;
 let pendingSnapshot: string | null = null;
 const undoStack: string[] = [];
 const redoStack: string[] = [];
+const expandedGroups = new Set<string>();
+const presetInsertCount = new Map<string, number>();
 
 const canvas = byId<HTMLCanvasElement>('mapCanvas');
 const customMapList = byId('customMapList');
@@ -119,6 +138,10 @@ const mapCount = byId('mapCount');
 const objectList = byId('objectList');
 const objectEmpty = byId('objectEmpty');
 const objectCount = byId('objectCount');
+const objectSearch = byId<HTMLInputElement>('objectSearch');
+const presetList = byId('presetList');
+const presetEmpty = byId('presetEmpty');
+const presetCount = byId('presetCount');
 const mapSearch = byId<HTMLInputElement>('mapSearch');
 const inspectorBody = byId('inspectorBody');
 const saveStateLabel = byId('saveStateLabel');
@@ -142,17 +165,37 @@ const undoBtn = byId<HTMLButtonElement>('undoBtn');
 const redoBtn = byId<HTMLButtonElement>('redoBtn');
 const focusObjectBtn = byId<HTMLButtonElement>('focusObjectBtn');
 const deleteObjectBtn = byId<HTMLButtonElement>('deleteObjectBtn');
+const groupSelectionBtn = byId<HTMLButtonElement>('groupSelectionBtn');
 
 let preview: MapPreview | null = null;
 try {
   preview = new MapPreview(canvas, {
-    onSelect: (id) => selectObject(id),
+    onSelect: (id, additive) => selectObject(id, additive),
     onTransform: (id, transform) => {
       const object = activeDoc()?.objects.find((entry) => entry.id === id);
       if (!object) return;
       object.position = transform.position;
       object.rotation = transform.rotation;
       object.scale = transform.scale;
+      scheduleSave();
+      updateTransformInputs();
+      renderSelectionHud();
+    },
+    onGroupTransform: (ids, delta) => {
+      const doc = activeDoc();
+      if (!doc) return;
+      let changed = false;
+      for (const id of ids) {
+        const object = doc.objects.find((entry) => entry.id === id);
+        if (!object) continue;
+        object.position = [
+          round(object.position[0] + delta[0], 3),
+          round(object.position[1] + delta[1], 3),
+          round(object.position[2] + delta[2], 3),
+        ];
+        changed = true;
+      }
+      if (!changed) return;
       scheduleSave();
       updateTransformInputs();
       renderSelectionHud();
@@ -224,6 +267,7 @@ function activeDoc(): MapDoc | null {
         theme: { ...cloneTheme(BUILTIN_MAP_THEMES[selectedMapId]), label: meta.name },
         env: emptyMapEnv(),
         objects: [],
+        groups: [],
       };
     }
     return builtinPreview;
@@ -286,9 +330,15 @@ function restoreSnapshot(snapshot: string): void {
   doc.subtitle = restored.subtitle;
   doc.base = restored.base;
   doc.theme = restored.theme;
+  doc.env = restored.env;
   doc.objects = restored.objects;
+  doc.groups = restored.groups;
   doc.theme.label = doc.name;
-  if (selectedObjectId && !doc.objects.some((object) => object.id === selectedObjectId)) selectedObjectId = null;
+  selectedIds = selectedIds.filter((id) => doc.objects.some((object) => object.id === id));
+  if (selectedGroupId && !doc.groups.some((group) => group.id === selectedGroupId)) selectedGroupId = null;
+  if (selectedObjectId && !doc.objects.some((object) => object.id === selectedObjectId)) {
+    selectedObjectId = selectedIds[selectedIds.length - 1] ?? null;
+  }
   afterChange({ inspector: true });
 }
 
@@ -325,12 +375,20 @@ function resetHistory(): void {
 // Selection and editing
 // ---------------------------------------------------------------------------
 
+function resetObjectSearch(): void {
+  objectSearchQuery = '';
+  if (objectSearch.value) objectSearch.value = '';
+}
+
 function selectMap(id: string): void {
   if (id === selectedMapId) return;
   selectedMapId = id;
   selectedObjectId = null;
+  selectedIds = [];
+  selectedGroupId = null;
   placementShape = null;
-  tab = isBuiltinMapId(id) ? 'map' : 'map';
+  tab = 'map';
+  resetObjectSearch();
   resetHistory();
   preview?.setPlacement(null);
   refreshPreview();
@@ -338,16 +396,88 @@ function selectMap(id: string): void {
   flushSave();
 }
 
-function selectObject(id: string | null): void {
-  if (id && !activeDoc()?.objects.some((object) => object.id === id)) id = null;
-  if (selectedObjectId === id && (id ? tab === 'object' : true)) return;
-  selectedObjectId = id;
-  if (id) tab = 'object';
+function selectedObjects(): MapObject[] {
+  const doc = activeDoc();
+  if (!doc || selectedIds.length === 0) return [];
+  return doc.objects.filter((object) => selectedIds.includes(object.id));
+}
+
+/** Pushes the current selection into the 3D preview (single or group gizmo). */
+function emitSelection(): void {
+  preview?.setSelectionIds(selectedIds);
+}
+
+function applySelection(ids: string[], primary: string | null = null, groupId: string | null = null): void {
+  const doc = activeDoc();
+  const known = new Set(doc?.objects.map((object) => object.id) ?? []);
+  const unique = [...new Set(ids)].filter((id) => known.has(id));
+  selectedIds = unique;
+  selectedObjectId = primary && unique.includes(primary) ? primary : (unique[unique.length - 1] ?? null);
+  selectedGroupId = groupId && doc?.groups.some((group) => group.id === groupId) ? groupId : null;
+  if (unique.length > 0) tab = 'object';
   renderObjects();
   renderInspector();
   renderStage();
   renderTabs();
-  preview?.setSelection(id);
+  renderMetrics();
+  emitSelection();
+}
+
+/** Selects exactly one object without expanding its group (used by the list). */
+function selectObjectOnly(id: string | null, additive = false): void {
+  const doc = activeDoc();
+  if (!doc) return;
+  if (!id) {
+    applySelection([]);
+    return;
+  }
+  const object = doc.objects.find((entry) => entry.id === id);
+  if (!object) {
+    applySelection([]);
+    return;
+  }
+  if (additive) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((entry) => entry !== id) : [...selectedIds, id];
+    applySelection(next, id);
+    return;
+  }
+  if (selectedIds.length === 1 && selectedObjectId === id) return;
+  applySelection([id], id);
+}
+
+function selectObject(id: string | null, additive = false): void {
+  const doc = activeDoc();
+  if (!doc) return;
+  if (!id) {
+    applySelection([]);
+    return;
+  }
+  const object = doc.objects.find((entry) => entry.id === id);
+  if (!object) {
+    applySelection([]);
+    return;
+  }
+  if (additive) {
+    const next = selectedIds.includes(id) ? selectedIds.filter((entry) => entry !== id) : [...selectedIds, id];
+    applySelection(next, id);
+    return;
+  }
+  const group = groupOfObject(doc, id);
+  if (group) {
+    if (!expandedGroups.has(group.id)) expandedGroups.add(group.id);
+    applySelection(group.objectIds, id, group.id);
+    return;
+  }
+  if (selectedIds.length === 1 && selectedObjectId === id) return;
+  applySelection([id], id);
+}
+
+function selectGroup(groupId: string): void {
+  const doc = activeDoc();
+  const group = doc?.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  if (!expandedGroups.has(group.id)) expandedGroups.add(group.id);
+  applySelection(group.objectIds, group.objectIds[0] ?? null, group.id);
 }
 
 function setTab(next: 'map' | 'object'): void {
@@ -397,21 +527,58 @@ function addObject(shape: MapShape, position: Vec3): void {
   object.name = `${shapeLabel(shape)} ${doc.objects.filter((entry) => entry.shape === shape).length + 1}`;
   doc.objects.push(object);
   selectedObjectId = object.id;
+  selectedIds = [object.id];
+  selectedGroupId = null;
   tab = 'object';
   afterChange({ inspector: true });
+  emitSelection();
   showToast(`Добавлен объект «${object.name}».`);
 }
 
-function deleteObject(id: string | null = selectedObjectId): void {
+function syncGroups(doc: MapDoc): void {
+  if (!Array.isArray(doc.groups)) doc.groups = [];
+  const known = new Set(doc.objects.map((object) => object.id));
+  const claimed = new Set<string>();
+  for (const group of doc.groups) {
+    group.objectIds = group.objectIds.filter((id) => known.has(id) && !claimed.has(id));
+    for (const id of group.objectIds) claimed.add(id);
+  }
+  doc.groups = doc.groups.filter((group) => group.objectIds.length > 0);
+}
+
+function deleteObjects(ids: string[]): void {
   const doc = activeDoc();
-  if (!doc || !id || isReadOnly(doc)) return;
-  const object = doc.objects.find((entry) => entry.id === id);
-  if (!object) return;
+  if (!doc || isReadOnly(doc)) return;
+  const targets = [...new Set(ids)].filter((id) => doc.objects.some((object) => object.id === id));
+  if (targets.length === 0) return;
   recordUndo();
-  doc.objects = doc.objects.filter((entry) => entry.id !== id);
-  if (selectedObjectId === id) selectedObjectId = null;
+  const removed = new Set(targets);
+  doc.objects = doc.objects.filter((object) => !removed.has(object.id));
+  syncGroups(doc);
+  applySelection([]);
   afterChange({ inspector: true });
-  showToast(`Объект «${object.name}» удалён.`);
+  showToast(targets.length === 1 ? 'Объект удалён.' : `Удалено объектов: ${targets.length}.`);
+}
+
+function deleteObject(id: string | null = selectedObjectId): void {
+  if (!id) return;
+  deleteObjects([id]);
+}
+
+function deleteSelectedObjects(): void {
+  deleteObjects(selectedIds.length > 0 ? selectedIds : selectedObjectId ? [selectedObjectId] : []);
+}
+
+function cloneObjectWithOffset(source: MapObject, offset: Vec3): MapObject {
+  return {
+    ...cloneMapObject(source),
+    id: `obj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    position: [
+      round(source.position[0] + offset[0], 3),
+      round(source.position[1] + offset[1], 3),
+      round(source.position[2] + offset[2], 3),
+    ],
+  };
 }
 
 function duplicateObject(id: string | null = selectedObjectId): void {
@@ -420,19 +587,50 @@ function duplicateObject(id: string | null = selectedObjectId): void {
   const source = doc.objects.find((entry) => entry.id === id);
   if (!source) return;
   recordUndo();
-  const object: MapObject = {
-    ...source,
-    id: `obj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
-    name: `${source.name} (копия)`,
-    position: [source.position[0] + 1, source.position[1], source.position[2]],
-    rotation: [...source.rotation],
-    scale: [...source.scale],
-  };
+  const object = cloneObjectWithOffset(source, [1, 0, 0]);
+  object.name = `${source.name} (копия)`;
   doc.objects.push(object);
+  const group = groupOfObject(doc, source.id);
+  if (group) group.objectIds.push(object.id);
+  selectedIds = [object.id];
   selectedObjectId = object.id;
+  selectedGroupId = null;
   tab = 'object';
   afterChange({ inspector: true });
+  emitSelection();
   showToast('Объект продублирован.');
+}
+
+function duplicateSelectedObjects(): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const sources = selectedObjects().filter((object) => !object.locked);
+  if (sources.length === 0) {
+    showToast('Нет объектов для копирования.', 'warn');
+    return;
+  }
+  recordUndo();
+  const copies = sources.map((source) => {
+    const copy = cloneObjectWithOffset(source, [1, 0, 1]);
+    copy.name = `${source.name} (копия)`;
+    return copy;
+  });
+  doc.objects.push(...copies);
+  const group = selectedGroupId ? doc.groups.find((entry) => entry.id === selectedGroupId) : null;
+  let nextGroup: MapObjectGroup | null = null;
+  if (group && copies.length > 1) {
+    nextGroup = {
+      ...createMapObjectGroup(`${group.name} (копия)`, group.color),
+      objectIds: copies.map((copy) => copy.id),
+    };
+    doc.groups.push(nextGroup);
+  }
+  selectedIds = copies.map((copy) => copy.id);
+  selectedObjectId = copies[0].id;
+  selectedGroupId = nextGroup?.id ?? null;
+  afterChange({ inspector: true });
+  emitSelection();
+  showToast(copies.length === 1 ? 'Объект продублирован.' : `Скопировано объектов: ${copies.length}.`);
 }
 
 function toggleObjectFlag(id: string, flag: 'visible' | 'locked'): void {
@@ -445,6 +643,175 @@ function toggleObjectFlag(id: string, flag: 'visible' | 'locked'): void {
   afterChange({ inspector: true });
 }
 
+function toggleManyObjectsFlag(ids: string[], flag: 'visible' | 'locked'): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc) || ids.length === 0) return;
+  recordUndo();
+  const targets = doc.objects.filter((object) => ids.includes(object.id));
+  const next = !targets.every((object) => object[flag]);
+  for (const object of targets) object[flag] = next;
+  afterChange({ inspector: true });
+}
+
+// ---------------------------------------------------------------------------
+// Groups
+// ---------------------------------------------------------------------------
+
+function createGroupFromSelection(): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const ids = selectedObjects()
+    .filter((object) => !object.locked)
+    .map((object) => object.id);
+  if (ids.length < 2) {
+    showToast('Выберите минимум два объекта (Ctrl+клик), чтобы создать группу.', 'warn');
+    return;
+  }
+  recordUndo();
+  const picked = new Set(ids);
+  for (const group of doc.groups) group.objectIds = group.objectIds.filter((id) => !picked.has(id));
+  doc.groups = doc.groups.filter((group) => group.objectIds.length > 0);
+  const group = createMapObjectGroup(`Группа ${doc.groups.length + 1}`, doc.theme.accent);
+  group.objectIds = ids;
+  doc.groups.push(group);
+  expandedGroups.add(group.id);
+  applySelection(ids, ids[0], group.id);
+  afterChange({ inspector: true });
+  showToast(`Создана группа «${group.name}» (${ids.length} объектов).`);
+}
+
+function selectWholeGroup(groupId: string): void {
+  selectGroup(groupId);
+  preview?.focusObjects(selectedIds);
+}
+
+function duplicateGroup(groupId: string): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const group = doc.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  const sources = group.objectIds
+    .map((id) => doc.objects.find((object) => object.id === id))
+    .filter((object): object is MapObject => Boolean(object));
+  if (sources.length === 0) return;
+  recordUndo();
+  const copies = sources.map((source) => {
+    const copy = cloneObjectWithOffset(source, [1, 0, 1]);
+    copy.name = `${source.name} (копия)`;
+    return copy;
+  });
+  doc.objects.push(...copies);
+  const copyGroup = {
+    ...createMapObjectGroup(`${group.name} (копия)`, group.color),
+    objectIds: copies.map((copy) => copy.id),
+  };
+  doc.groups.push(copyGroup);
+  expandedGroups.add(copyGroup.id);
+  applySelection(copyGroup.objectIds, copyGroup.objectIds[0] ?? null, copyGroup.id);
+  afterChange({ inspector: true });
+  showToast(`Группа «${group.name}» скопирована.`);
+}
+
+function dissolveGroup(groupId: string): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const group = doc.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  recordUndo();
+  doc.groups = doc.groups.filter((entry) => entry.id !== groupId);
+  expandedGroups.delete(groupId);
+  selectedGroupId = null;
+  afterChange({ inspector: true });
+  showToast('Группа расформирована, объекты остались на карте.');
+}
+
+function deleteGroupWithObjects(groupId: string): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const group = doc.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  if (!window.confirm(`Удалить группу «${group.name}» вместе с ${group.objectIds.length} объектами?`)) return;
+  deleteObjects(group.objectIds);
+}
+
+function nudgeObjects(ids: string[], delta: Vec3): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const targets = doc.objects.filter((object) => ids.includes(object.id) && !object.locked);
+  if (targets.length === 0) return;
+  recordUndo();
+  for (const object of targets) {
+    object.position = [
+      round(object.position[0] + delta[0], 3),
+      round(object.position[1] + delta[1], 3),
+      round(object.position[2] + delta[2], 3),
+    ];
+  }
+  afterChange({ inspector: true });
+}
+
+/** Rotates a group around its centroid; object rotations follow the same angle. */
+function rotateGroup(groupId: string, angleDeg: number): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const group = doc.groups.find((entry) => entry.id === groupId);
+  if (!group) return;
+  const targets = group.objectIds
+    .map((id) => doc.objects.find((object) => object.id === id))
+    .filter((object): object is MapObject => object !== undefined && !object.locked);
+  if (targets.length === 0) return;
+  const centerX = targets.reduce((sum, object) => sum + object.position[0], 0) / targets.length;
+  const centerZ = targets.reduce((sum, object) => sum + object.position[2], 0) / targets.length;
+  const angle = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  recordUndo();
+  for (const object of targets) {
+    const dx = object.position[0] - centerX;
+    const dz = object.position[2] - centerZ;
+    object.position = [
+      round(centerX + dx * cos - dz * sin, 3),
+      object.position[1],
+      round(centerZ + dx * sin + dz * cos, 3),
+    ];
+    object.rotation = [object.rotation[0], round(object.rotation[1] + angleDeg, 2), object.rotation[2]];
+  }
+  afterChange({ inspector: true });
+}
+
+function snapSelectedToGrid(): void {
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return;
+  const targets = selectedObjects().filter((object) => !object.locked);
+  if (targets.length === 0) return;
+  const step = snapStep > 0 ? snapStep : 0.25;
+  recordUndo();
+  for (const object of targets) {
+    object.position = [
+      round(Math.round(object.position[0] / step) * step, 3),
+      object.position[1],
+      round(Math.round(object.position[2] / step) * step, 3),
+    ];
+  }
+  afterChange({ inspector: true });
+}
+
+function alignSelected(axis: 'x' | 'z' | 'y'): void {
+  const targets = selectedObjects().filter((object) => !object.locked);
+  if (targets.length < 2) return;
+  recordUndo();
+  if (axis === 'y') {
+    for (const object of targets) object.position[1] = targets[0].position[1];
+  } else {
+    const values = targets.map((object) => (axis === 'x' ? object.position[0] : object.position[2]));
+    const center = values.reduce((sum, value) => sum + value, 0) / values.length;
+    for (const object of targets) {
+      object.position[axis === 'x' ? 0 : 2] = round(center, 3);
+    }
+  }
+  afterChange({ inspector: true });
+}
+
 function createMap(base: MapBase = 'none'): void {
   const doc = createEmptyMapDoc(base);
   const index = state.maps.length + 1;
@@ -453,6 +820,9 @@ function createMap(base: MapBase = 'none'): void {
   state.maps.push(doc);
   selectedMapId = doc.id;
   selectedObjectId = null;
+  selectedIds = [];
+  selectedGroupId = null;
+  resetObjectSearch();
   resetHistory();
   refreshPreview();
   renderAll();
@@ -467,6 +837,9 @@ function copyBuiltinMap(id: BuiltinMapId): void {
   state.maps.push(doc);
   selectedMapId = doc.id;
   selectedObjectId = null;
+  selectedIds = [];
+  selectedGroupId = null;
+  resetObjectSearch();
   resetHistory();
   refreshPreview();
   renderAll();
@@ -482,6 +855,9 @@ function duplicateMap(id: string): void {
   state.maps.push(doc);
   selectedMapId = doc.id;
   selectedObjectId = null;
+  selectedIds = [];
+  selectedGroupId = null;
+  resetObjectSearch();
   resetHistory();
   refreshPreview();
   renderAll();
@@ -497,12 +873,161 @@ function deleteMap(id: string): void {
   if (selectedMapId === id) {
     selectedMapId = state.maps[0]?.id ?? 'jaddy';
     selectedObjectId = null;
+    selectedIds = [];
+    selectedGroupId = null;
+    resetObjectSearch();
     resetHistory();
   }
   refreshPreview();
   renderAll();
   flushSave();
   showToast('Карта удалена.');
+}
+
+// ---------------------------------------------------------------------------
+// Presets
+// ---------------------------------------------------------------------------
+
+function freshObjectId(): string {
+  return `obj-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function presetSelectionName(): string {
+  const doc = activeDoc();
+  const objects = selectedObjects();
+  if (selectedGroupId && doc) {
+    const group = doc.groups.find((entry) => entry.id === selectedGroupId);
+    if (group) return group.name;
+  }
+  if (objects.length === 1) return objects[0].name;
+  return `Пресет ${state.presets.length + 1}`;
+}
+
+function saveObjectsAsPreset(objects: MapObject[], suggested: string): void {
+  if (objects.length === 0) {
+    showToast('Сначала выделите объекты, которые нужно сохранить в пресет.', 'warn');
+    return;
+  }
+  const answer = window.prompt('Название пресета', suggested);
+  if (answer === null) return;
+  const name = answer.trim().slice(0, 48) || suggested;
+  const preset: MapPreset = {
+    id: createPresetId(),
+    name,
+    createdAt: new Date().toISOString(),
+    objects: objects.map(cloneMapObject),
+  };
+  state.presets.unshift(preset);
+  scheduleSave();
+  renderPresets();
+  showToast(`Пресет «${name}» сохранён (${preset.objects.length} объектов).`);
+}
+
+function saveSelectionAsPreset(): void {
+  saveObjectsAsPreset(selectedObjects(), presetSelectionName());
+}
+
+function insertPreset(presetId: string): void {
+  const doc = activeDoc();
+  const preset = state.presets.find((entry) => entry.id === presetId);
+  if (!doc || !preset) return;
+  if (isReadOnly(doc)) {
+    showToast('Встроенный шаблон нельзя редактировать. Создайте копию карты.', 'warn');
+    return;
+  }
+  if (preset.objects.length === 0) return;
+  recordUndo();
+  const index = presetInsertCount.get(preset.id) ?? 0;
+  presetInsertCount.set(preset.id, index + 1);
+  const shift = index * 0.8;
+  const centerX = preset.objects.reduce((sum, object) => sum + object.position[0], 0) / preset.objects.length;
+  const centerZ = preset.objects.reduce((sum, object) => sum + object.position[2], 0) / preset.objects.length;
+  const dx = shift - centerX;
+  const dz = shift - centerZ;
+  const copies = preset.objects.map((source) => {
+    const copy = cloneMapObject(source);
+    copy.id = freshObjectId();
+    copy.position = [
+      round(source.position[0] + dx, 3),
+      source.position[1],
+      round(source.position[2] + dz, 3),
+    ];
+    return copy;
+  });
+  doc.objects.push(...copies);
+  let group: MapObjectGroup | null = null;
+  if (copies.length > 1) {
+    group = {
+      ...createMapObjectGroup(preset.name, preset.objects[0]?.color ?? doc.theme.accent),
+      objectIds: copies.map((copy) => copy.id),
+    };
+    doc.groups.push(group);
+    expandedGroups.add(group.id);
+  }
+  applySelection(
+    copies.map((copy) => copy.id),
+    copies[0]?.id ?? null,
+    group?.id ?? null,
+  );
+  afterChange({ inspector: true });
+  showToast(`Пресет «${preset.name}» вставлен на карту.`);
+}
+
+function renamePreset(presetId: string): void {
+  const preset = state.presets.find((entry) => entry.id === presetId);
+  if (!preset) return;
+  const answer = window.prompt('Новое название пресета', preset.name);
+  if (answer === null) return;
+  const name = answer.trim().slice(0, 48);
+  if (!name) return;
+  preset.name = name;
+  scheduleSave();
+  renderPresets();
+}
+
+function deletePreset(presetId: string): void {
+  const preset = state.presets.find((entry) => entry.id === presetId);
+  if (!preset) return;
+  if (!window.confirm(`Удалить пресет «${preset.name}»?`)) return;
+  state.presets = state.presets.filter((entry) => entry.id !== presetId);
+  presetInsertCount.delete(presetId);
+  scheduleSave();
+  renderPresets();
+  showToast('Пресет удалён.');
+}
+
+function renderPresets(): void {
+  presetCount.textContent = String(state.presets.length);
+  presetEmpty.hidden = state.presets.length > 0;
+  presetList.hidden = state.presets.length === 0;
+  presetList.innerHTML = state.presets
+    .map((preset) => {
+      const preview = preset.objects[0];
+      const color = preview?.emissive && preview.emissive !== '#000000' ? preview.emissive : (preview?.color ?? '#8a8f9c');
+      return `
+        <div class="preset-row" data-preset-id="${escapeHtml(preset.id)}" role="button" tabindex="0"
+          title="Вставить пресет на карту" style="--preset-color:${escapeHtml(color)}">
+          <span class="preset-swatch">${preview ? shapeGlyph(preview.shape) : '▣'}</span>
+          <span class="preset-copy">
+            <b>${escapeHtml(preset.name)}</b>
+            <small>${preset.objects.length} об. · с анимацией: ${
+              preset.objects.filter((object) => object.animation?.enabled).length
+            }</small>
+          </span>
+          <span class="map-row-actions">
+            <button class="icon-mini" type="button" data-preset-action="insert" data-preset-id="${escapeHtml(
+              preset.id,
+            )}" title="Вставить">＋</button>
+            <button class="icon-mini" type="button" data-preset-action="rename" data-preset-id="${escapeHtml(
+              preset.id,
+            )}" title="Переименовать">✎</button>
+            <button class="icon-mini danger" type="button" data-preset-action="delete" data-preset-id="${escapeHtml(
+              preset.id,
+            )}" title="Удалить пресет">×</button>
+          </span>
+        </div>`;
+    })
+    .join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -688,47 +1213,134 @@ function renderMapLists(): void {
   }).join('');
 }
 
+function objectMatchesQuery(object: MapObject): boolean {
+  const query = objectSearchQuery.trim().toLowerCase();
+  if (!query) return true;
+  return `${object.name} ${object.shape} ${shapeLabel(object.shape)}`.toLowerCase().includes(query);
+}
+
+function objectRowHtml(object: MapObject, inGroup: boolean): string {
+  const selected = selectedIds.includes(object.id);
+  const glow = object.emissive === '#000000' ? object.color : object.emissive;
+  return `
+    <div class="object-row ${selected ? 'selected' : ''} ${object.visible ? '' : 'hidden'} ${
+      inGroup ? 'in-group' : ''
+    }"
+      data-object-id="${escapeHtml(object.id)}" role="button" tabindex="0"
+      style="--obj-color:${object.color};--obj-glow:${glow}">
+      <button type="button" class="object-eye ${object.visible ? '' : 'off'}"
+        data-object-eye="${escapeHtml(object.id)}" title="${object.visible ? 'Скрыть' : 'Показать'}">${
+          object.visible ? '◉' : '◌'
+        }</button>
+      <button type="button" class="object-lock ${object.locked ? 'on' : ''}"
+        data-object-lock="${escapeHtml(object.id)}" title="${object.locked ? 'Разблокировать' : 'Заблокировать'}">${
+          object.locked ? '▣' : '▢'
+        }</button>
+      <span class="object-shape">${shapeGlyph(object.shape)}</span>
+      <span class="object-copy">
+        <span class="object-name">${escapeHtml(object.name)}</span>
+        <span class="object-meta">${shapeLabel(object.shape)} · ${formatNumber(object.position[0], 2)}, ${formatNumber(
+          object.position[1],
+          2,
+        )}, ${formatNumber(object.position[2], 2)}${object.animation?.enabled ? ' · ◎ анимация' : ''}</span>
+      </span>
+      <span class="map-row-actions">
+        <button type="button" class="icon-mini" data-object-action="preset" data-object-id="${escapeHtml(
+          object.id,
+        )}" title="Сохранить в пресеты">☆</button>
+        <button type="button" class="icon-mini" data-object-action="duplicate" data-object-id="${escapeHtml(
+          object.id,
+        )}" title="Дублировать объект">⧉</button>
+        <button type="button" class="icon-mini danger" data-object-action="delete" data-object-id="${escapeHtml(
+          object.id,
+        )}" title="Удалить объект">×</button>
+      </span>
+    </div>`;
+}
+
+function groupRowHtml(group: MapObjectGroup, members: MapObject[]): string {
+  const selected = selectedGroupId === group.id;
+  const expanded = expandedGroups.has(group.id);
+  const visible = members.some((object) => object.visible);
+  const locked = members.length > 0 && members.every((object) => object.locked);
+  const animated = members.filter((object) => object.animation?.enabled).length;
+  return `
+    <div class="group-row ${selected ? 'selected' : ''}" data-group-id="${escapeHtml(group.id)}"
+      role="button" tabindex="0" style="--group-color:${group.color}">
+      <button type="button" class="group-toggle" data-group-toggle="${escapeHtml(group.id)}"
+        title="${expanded ? 'Свернуть' : 'Развернуть'}">${expanded ? '▾' : '▸'}</button>
+      <span class="group-swatch"></span>
+      <span class="object-copy">
+        <span class="object-name">${escapeHtml(group.name)}</span>
+        <span class="object-meta">${members.length} об.${animated ? ` · ◎ ${animated}` : ''} · группа</span>
+      </span>
+      <button type="button" class="object-eye ${visible ? '' : 'off'}"
+        data-group-eye="${escapeHtml(group.id)}" title="${visible ? 'Скрыть группу' : 'Показать группу'}">${
+          visible ? '◉' : '◌'
+        }</button>
+      <button type="button" class="object-lock ${locked ? 'on' : ''}"
+        data-group-lock="${escapeHtml(group.id)}" title="${locked ? 'Разблокировать группу' : 'Заблокировать группу'}">${
+          locked ? '▣' : '▢'
+        }</button>
+      <span class="map-row-actions">
+        <button type="button" class="icon-mini" data-group-action="preset" data-group-id="${escapeHtml(
+          group.id,
+        )}" title="Сохранить группу в пресеты">☆</button>
+        <button type="button" class="icon-mini" data-group-action="duplicate" data-group-id="${escapeHtml(
+          group.id,
+        )}" title="Скопировать группу">⧉</button>
+        <button type="button" class="icon-mini" data-group-action="dissolve" data-group-id="${escapeHtml(
+          group.id,
+        )}" title="Расформировать группу">⤫</button>
+      </span>
+    </div>`;
+}
+
 function renderObjects(): void {
   const doc = activeDoc();
   const objects = doc?.objects ?? [];
-  objectCount.textContent = String(objects.length);
+  objectCount.textContent =
+    selectedIds.length > 0 ? `${selectedIds.length} / ${objects.length}` : String(objects.length);
   objectEmpty.hidden = objects.length > 0;
   objectList.hidden = objects.length === 0;
 
-  objectList.innerHTML = objects
-    .map((object) => {
-      const selected = object.id === selectedObjectId;
-      return `
-        <div class="object-row ${selected ? 'selected' : ''} ${object.visible ? '' : 'hidden'}"
-          data-object-id="${escapeHtml(object.id)}" role="button" tabindex="0"
-          style="--obj-color:${object.color};--obj-glow:${object.emissive === '#000000' ? object.color : object.emissive}">
-          <button type="button" class="object-eye ${object.visible ? '' : 'off'}"
-            data-object-eye="${escapeHtml(object.id)}" title="${object.visible ? 'Скрыть' : 'Показать'}">${
-              object.visible ? '◉' : '◌'
-            }</button>
-          <button type="button" class="object-lock ${object.locked ? 'on' : ''}"
-            data-object-lock="${escapeHtml(object.id)}" title="${object.locked ? 'Разблокировать' : 'Заблокировать'}">${
-              object.locked ? '▣' : '▢'
-            }</button>
-          <span class="object-shape">${shapeGlyph(object.shape)}</span>
-          <span class="object-copy">
-            <span class="object-name">${escapeHtml(object.name)}</span>
-            <span class="object-meta">${shapeLabel(object.shape)} · ${formatNumber(object.position[0], 2)}, ${formatNumber(
-              object.position[1],
-              2,
-            )}, ${formatNumber(object.position[2], 2)}</span>
-          </span>
-          <span class="map-row-actions">
-            <button type="button" class="icon-mini" data-object-action="duplicate" data-object-id="${escapeHtml(
-              object.id,
-            )}" title="Дублировать объект">⧉</button>
-            <button type="button" class="icon-mini danger" data-object-action="delete" data-object-id="${escapeHtml(
-              object.id,
-            )}" title="Удалить объект">×</button>
-          </span>
-        </div>`;
-    })
-    .join('');
+  const query = objectSearchQuery.trim().toLowerCase();
+  const objectById = new Map(objects.map((object) => [object.id, object]));
+  const groupByObject = new Map<string, MapObjectGroup>();
+  for (const group of doc?.groups ?? []) {
+    for (const id of group.objectIds) groupByObject.set(id, group);
+  }
+  const matching = new Set(objects.filter(objectMatchesQuery).map((object) => object.id));
+  const rows: string[] = [];
+  const seenGroups = new Set<string>();
+
+  for (const object of objects) {
+    const group = groupByObject.get(object.id);
+    if (group) {
+      if (seenGroups.has(group.id)) continue;
+      seenGroups.add(group.id);
+      const members = group.objectIds
+        .map((id) => objectById.get(id))
+        .filter((entry): entry is MapObject => Boolean(entry));
+      const matchingMembers = members.filter((entry) => matching.has(entry.id));
+      const groupMatchesQuery = !query || group.name.toLowerCase().includes(query);
+      if (matchingMembers.length === 0 && !groupMatchesQuery) continue;
+      rows.push(groupRowHtml(group, members));
+      const expanded = expandedGroups.has(group.id) || Boolean(query);
+      if (expanded) {
+        for (const member of query && !groupMatchesQuery ? matchingMembers : members) {
+          rows.push(objectRowHtml(member, true));
+        }
+      }
+      continue;
+    }
+    if (matching.has(object.id)) rows.push(objectRowHtml(object, false));
+  }
+
+  objectList.innerHTML =
+    rows.length > 0
+      ? rows.join('')
+      : `<div class="roster-empty">Ничего не найдено.<br /><small>Измените запрос или снимите фильтр.</small></div>`;
 }
 
 function renderTabs(): void {
@@ -769,25 +1381,47 @@ function renderStage(): void {
   hudMeta.innerHTML = `
     <span class="meta-chip" style="--chip:${doc.theme.accent}">◈ ${escapeHtml(meta.name)}</span>
     <span class="meta-chip" style="--chip:${doc.theme.tiles.playerLight}">${doc.objects.length} объектов</span>
+    <span class="meta-chip" style="--chip:${doc.theme.accent}">${doc.groups.length} групп</span>
     <span class="meta-chip" style="--chip:${doc.theme.accent}">${readOnly ? 'только просмотр' : 'редактируется'}</span>`;
   hudBadge.textContent = readOnly ? 'Шаблон · просмотр' : 'Редактируется';
   hudBadge.className = `hud-badge ${readOnly ? 'builtin' : ''}`;
   renderSelectionHud();
-  deleteObjectBtn.disabled = !selectedObjectId || readOnly;
-  focusObjectBtn.disabled = !selectedObjectId;
+  deleteObjectBtn.disabled = selectedIds.length === 0 || readOnly;
+  focusObjectBtn.disabled = selectedIds.length === 0;
+  groupSelectionBtn.disabled = selectedIds.length < 2 || readOnly;
   renderStageHint();
 }
 
 function renderSelectionHud(): void {
-  const object = selectedObject();
-  if (!object) {
+  const doc = activeDoc();
+  const objects = selectedObjects();
+  if (objects.length === 0) {
     selectionHud.textContent = 'Ничего не выбрано';
     return;
   }
-  selectionHud.textContent = `${object.name} · ${shapeLabel(object.shape)} · X ${formatNumber(object.position[0], 2)} / Y ${formatNumber(
-    object.position[1],
+  if (selectedGroupId && doc) {
+    const group = doc.groups.find((entry) => entry.id === selectedGroupId);
+    if (group) {
+      const cx = objects.reduce((sum, object) => sum + object.position[0], 0) / objects.length;
+      const cz = objects.reduce((sum, object) => sum + object.position[2], 0) / objects.length;
+      selectionHud.textContent = `Группа «${group.name}» · ${objects.length} объектов · X ${formatNumber(
+        cx,
+        2,
+      )} / Z ${formatNumber(cz, 2)} · гизмо перемещает группу`;
+      return;
+    }
+  }
+  if (objects.length > 1) {
+    selectionHud.textContent = `Выбрано объектов: ${objects.length} · гизмо перемещает выделение · Ctrl+G — группа`;
+    return;
+  }
+  const object = objects[0];
+  selectionHud.textContent = `${object.name} · ${shapeLabel(object.shape)} · X ${formatNumber(
+    object.position[0],
     2,
-  )} / Z ${formatNumber(object.position[2], 2)}`;
+  )} / Y ${formatNumber(object.position[1], 2)} / Z ${formatNumber(object.position[2], 2)}${
+    object.animation?.enabled ? ' · анимация' : ''
+  }`;
 }
 
 function renderStageHint(): void {
@@ -797,13 +1431,20 @@ function renderStageHint(): void {
     )}». Объект останется в палитре для быстрой расстановки; Esc — выход.</p>`;
     return;
   }
-  if (selectedObject()) {
+  if (selectedIds.length > 1) {
     stageHint.innerHTML =
-      '<span class="stage-ability-label">Гизмо</span><p>W — двигать, E — вращать, R — масштаб, F — фокус, Ctrl+D — дублировать, Del — удалить. Привязка помогает ставить объекты ровно.</p>';
+      '<span class="stage-ability-label">Группа</span><p>Гизмо двигает всё выделение сразу. Ctrl+G — объединить в группу, Ctrl+D — скопировать, Del — удалить. В инспекторе можно повернуть группу и сохранить её в пресет.</p>';
+    return;
+  }
+  if (selectedObject()) {
+    const object = selectedObject() as MapObject;
+    stageHint.innerHTML = `<span class="stage-ability-label">Гизмо</span><p>W — двигать, E — вращать, R — масштаб, F — фокус, Ctrl+D — дублировать, Del — удалить.${
+      object.animation?.enabled ? ' Анимация проигрывается в превью и в игре.' : ''
+    }</p>`;
     return;
   }
   stageHint.innerHTML =
-    '<span class="stage-ability-label">Совет</span><p>Выберите примитив в палитре, затем кликните по доске. Объекты выделяются кликом в сцене или в списке слева.</p>';
+    '<span class="stage-ability-label">Совет</span><p>Выберите примитив в палитре, затем кликните по доске. Ctrl+клик добавляет объекты в выделение, чтобы собрать группу.</p>';
 }
 
 function metricCard(label: string, value: string, note = ''): string {
@@ -817,13 +1458,15 @@ function renderMetrics(): void {
   const objects = doc?.objects ?? [];
   const visible = objects.filter((object) => object.visible).length;
   const locked = objects.filter((object) => object.locked).length;
+  const animated = objects.filter((object) => object.animation?.enabled && object.animation.tracks.length > 0).length;
   metricStrip.innerHTML = [
     metricCard('Объекты', String(objects.length), 'примитивов на карте'),
+    metricCard('Группы', String(doc?.groups.length ?? 0), 'перемещаются целиком'),
+    metricCard('Анимации', String(animated), 'зациклено'),
     metricCard('Видимые', String(visible), 'участвуют в игре'),
     metricCard('Замки', String(locked), 'защищено от гизмо'),
+    metricCard('Пресеты', String(state.presets.length), 'в библиотеке'),
     metricCard('Окружение', doc ? mapMeta(doc.base).name : '—', 'процедурная основа'),
-    metricCard('Акцент', doc?.theme.accent ?? '—', 'цвет интерфейса'),
-    metricCard('Карт', String(state.maps.length), 'в библиотеке'),
   ].join('');
 }
 
@@ -1161,7 +1804,246 @@ function renderMapInspector(doc: MapDoc): void {
   `;
 }
 
+const ANIM_PROPERTY_RANGES: Record<MapAnimProperty, { min: number; max: number; step: number }> = {
+  position: { min: -20, max: 20, step: 0.05 },
+  rotation: { min: -720, max: 720, step: 5 },
+  scale: { min: -1, max: 4, step: 0.02 },
+  color: { min: -1, max: 1, step: 0.01 },
+  emissive: { min: -1, max: 1, step: 0.01 },
+  alpha: { min: -1, max: 1, step: 0.01 },
+};
+
+function animationTrackCard(track: MapAnimationTrack, index: number, readOnly: boolean): string {
+  const property = MAP_ANIM_PROPERTIES.find((entry) => entry.value === track.property) ?? MAP_ANIM_PROPERTIES[0];
+  const range = ANIM_PROPERTY_RANGES[track.property] ?? ANIM_PROPERTY_RANGES.position;
+  const usesColor = track.property === 'color' || track.property === 'emissive';
+  return `
+    <div class="anim-track">
+      <div class="anim-track-head">
+        <b>${escapeHtml(property.label)}${property.vector ? ` · ${track.axis.toUpperCase()}` : ''}</b>
+        <button class="icon-mini danger" type="button" data-action="delete-track" data-track-id="${escapeHtml(
+          track.id,
+        )}" title="Удалить трек" ${readOnly ? 'disabled' : ''}>×</button>
+      </div>
+      <div class="field-grid two">
+        ${selectField(
+          `animation.tracks.${index}.property`,
+          'Свойство',
+          track.property,
+          MAP_ANIM_PROPERTIES.map((entry) => ({ value: entry.value, label: entry.label })),
+          readOnly,
+        )}
+        ${selectField(
+          `animation.tracks.${index}.wave`,
+          'Кривая',
+          track.wave,
+          MAP_ANIM_WAVES.map((entry) => ({ value: entry.value, label: entry.label })),
+          readOnly,
+        )}
+      </div>
+      <div class="field-grid two" style="margin-top:6px">
+        ${
+          property.vector
+            ? selectField(
+                `animation.tracks.${index}.axis`,
+                'Ось',
+                track.axis,
+                [
+                  { value: 'x', label: 'X' },
+                  { value: 'y', label: 'Y' },
+                  { value: 'z', label: 'Z' },
+                ],
+                readOnly,
+              )
+            : colorField(`animation.tracks.${index}.color`, 'Целевой цвет', track.color, readOnly)
+        }
+        ${numberField(
+          `animation.tracks.${index}.amplitude`,
+          usesColor ? 'Смешивание' : 'Амплитуда',
+          track.amplitude,
+          range.min,
+          range.max,
+          range.step,
+          readOnly,
+        )}
+      </div>
+      <div class="theme-grid" style="margin-top:6px">
+        ${numberField(`animation.tracks.${index}.phase`, 'Фаза 0–1', track.phase, 0, 1, 0.01, readOnly)}
+        ${
+          usesColor
+            ? '<span class="mini-hint" style="margin:0;align-self:end">смешивает базовый цвет с целевым</span>'
+            : `<span class="mini-hint" style="margin:0;align-self:end">${
+                track.property === 'scale' ? 'доля размера, например 0.2 = ±20%' : 'размах колебания'
+              }</span>`
+        }
+      </div>
+    </div>`;
+}
+
+function animationSection(object: MapObject, readOnly: boolean): string {
+  const animation = object.animation ?? { enabled: false, duration: 3, phase: 0, tracks: [] };
+  const tracks = animation.tracks
+    .map((track, index) => animationTrackCard(track, index, readOnly))
+    .join('');
+  const quick: { id: string; label: string }[] = [
+    { id: 'float', label: 'Парение' },
+    { id: 'pulse', label: 'Пульс' },
+    { id: 'glow', label: 'Сияние' },
+    { id: 'fade', label: 'Мерцание' },
+    { id: 'spin', label: 'Оборот' },
+  ];
+  return `
+    <div class="panel-section">
+      <div class="section-head"><span>Анимация</span><small>${
+        animation.enabled ? `${animation.tracks.length} трек(ов)` : 'выключена'
+      }</small></div>
+      ${checkField(
+        'animation.enabled',
+        'Зацикленная анимация',
+        'Бесконечно повторяется в редакторе и в игре',
+        animation.enabled,
+        readOnly,
+      )}
+      <div class="anim-quick">
+        ${quick
+          .map(
+            (entry) =>
+              `<button class="btn small" type="button" data-action="anim-preset" data-preset="${entry.id}" ${
+                readOnly ? 'disabled' : ''
+              }>${entry.label}</button>`,
+          )
+          .join('')}
+      </div>
+      <div class="theme-grid" style="margin-top:8px">
+        ${numberField(
+          'animation.duration',
+          'Длительность, с',
+          animation.duration,
+          MAP_ANIMATION_LIMITS.durationMin,
+          MAP_ANIMATION_LIMITS.durationMax,
+          0.1,
+          readOnly,
+        )}
+        ${numberField('animation.phase', 'Фаза 0–1', animation.phase, 0, 1, 0.01, readOnly)}
+      </div>
+      <div class="anim-track-list">
+        ${tracks || '<p class="mini-hint" style="margin:0">Добавьте трек или выберите быстрый пресет выше.</p>'}
+      </div>
+      <div class="obj-actions">
+        ${MAP_ANIM_PROPERTIES.map(
+          (entry) =>
+            `<button class="btn small" type="button" data-action="add-track" data-property="${entry.value}" ${
+              readOnly ? 'disabled' : ''
+            }>＋ ${entry.label}</button>`,
+        ).join('')}
+      </div>
+    </div>`;
+}
+
+function ensureObjectAnimation(object: MapObject): MapObjectAnimation {
+  if (!object.animation) object.animation = createObjectAnimation(false);
+  return object.animation;
+}
+
+function addAnimationTrack(property: MapAnimProperty): void {
+  const doc = activeDoc();
+  const object = selectedObject();
+  if (!doc || !object || isReadOnly(doc) || object.locked) return;
+  const animation = ensureObjectAnimation(object);
+  if (animation.tracks.length >= MAP_ANIMATION_LIMITS.maxTracks) {
+    showToast(`Максимум ${MAP_ANIMATION_LIMITS.maxTracks} треков на объект.`, 'warn');
+    return;
+  }
+  recordUndo();
+  animation.tracks.push(createAnimationTrack(property));
+  animation.enabled = true;
+  afterChange({ inspector: true });
+}
+
+function removeAnimationTrack(trackId: string): void {
+  const doc = activeDoc();
+  const object = selectedObject();
+  if (!doc || !object || isReadOnly(doc) || object.locked) return;
+  const animation = object.animation;
+  if (!animation) return;
+  const next = animation.tracks.filter((track) => track.id !== trackId);
+  if (next.length === animation.tracks.length) return;
+  recordUndo();
+  animation.tracks = next;
+  if (next.length === 0) animation.enabled = false;
+  afterChange({ inspector: true });
+}
+
+/** Applies one of the quick looped-animation presets to the selected object. */
+function applyObjectAnimationPreset(presetId: string): void {
+  const doc = activeDoc();
+  const object = selectedObject();
+  if (!doc || !object || isReadOnly(doc) || object.locked) return;
+  recordUndo();
+  const animation = ensureObjectAnimation(object);
+  const tracks: MapAnimationTrack[] = [];
+  const add = (property: MapAnimProperty, init: Partial<MapAnimationTrack> = {}): void => {
+    tracks.push({ ...createAnimationTrack(property), ...init });
+  };
+
+  switch (presetId) {
+    case 'float':
+      animation.duration = 3.4;
+      add('position', { axis: 'y', amplitude: 0.32, wave: 'sine' });
+      break;
+    case 'pulse':
+      animation.duration = 1.8;
+      add('scale', { axis: 'x', amplitude: 0.16, wave: 'sine' });
+      add('scale', { axis: 'y', amplitude: 0.16, wave: 'sine' });
+      add('scale', { axis: 'z', amplitude: 0.16, wave: 'sine' });
+      break;
+    case 'glow': {
+      animation.duration = 2.6;
+      const glow = object.emissive === '#000000' ? object.color : object.emissive;
+      add('emissive', { amplitude: 1, wave: 'sine', color: glow });
+      break;
+    }
+    case 'fade':
+      animation.duration = 2.2;
+      add('alpha', { amplitude: 0.35, wave: 'triangle', phase: 0.25 });
+      break;
+    case 'spin':
+      animation.duration = 6;
+      add('rotation', { axis: 'y', amplitude: 180, wave: 'triangle' });
+      break;
+    default:
+      return;
+  }
+
+  animation.tracks = tracks.slice(0, MAP_ANIMATION_LIMITS.maxTracks);
+  animation.enabled = true;
+  animation.phase = 0;
+  object.animation = animation;
+  afterChange({ inspector: true });
+  showToast('Анимация применена. Настройте длительность и треки ниже.');
+}
+
+function focusSelection(): void {
+  if (selectedIds.length === 0) {
+    preview?.focusBoard();
+    return;
+  }
+  if (selectedIds.length === 1) preview?.focusObject(selectedIds[0]);
+  else preview?.focusObjects(selectedIds);
+}
+
 function renderObjectInspector(doc: MapDoc): void {
+  if (selectedIds.length > 1) {
+    const group =
+      (selectedGroupId ? doc.groups.find((entry) => entry.id === selectedGroupId) : null) ?? null;
+    if (group && group.objectIds.length === selectedIds.length) {
+      renderGroupInspector(doc, group);
+    } else {
+      renderMultiObjectInspector(doc);
+    }
+    return;
+  }
+
   const object = selectedObject();
   const readOnly = isReadOnly(doc);
   if (!object) {
@@ -1170,24 +2052,32 @@ function renderObjectInspector(doc: MapDoc): void {
         <div><span class="eyebrow">Объект</span><h2>Ничего не выбрано</h2></div>
         <span class="count-pill">0</span>
       </div>
-      <div class="tab-empty"><b>Выберите примитив</b>Кликните по объекту в сцене или в списке слева. Чтобы добавить новый, выберите форму в палитре под сценой.</div>`;
+      <div class="tab-empty"><b>Выберите примитив</b>Кликните по объекту в сцене или в списке слева. Чтобы добавить новый, выберите форму в палитре под сценой.<br /><br />Ctrl+клик собирает несколько объектов, после чего их можно объединить в группу.</div>`;
     return;
   }
   const disabled = readOnly || object.locked;
   const color = object.emissive === '#000000' ? object.color : object.emissive;
+  const group = groupOfObject(doc, object.id);
+  const groupOptions = [
+    { value: '', label: 'Без группы' },
+    ...doc.groups.map((entry) => ({ value: entry.id, label: entry.name })),
+  ];
   inspectorBody.innerHTML = `
     <div class="inspector-title-row">
       <div><span class="eyebrow">Примитив</span><h2>${escapeHtml(object.name)}</h2></div>
-      <span class="count-pill">${shapeLabel(object.shape)}</span>
+      <span class="count-pill">${shapeLabel(object.shape)}${object.animation?.enabled ? ' · ◎' : ''}</span>
     </div>
 
     <div class="object-hero" style="--obj-color:${object.color};--obj-glow:${color}">
       <span class="object-shape">${shapeGlyph(object.shape)}</span>
       <span class="object-hero-copy">
         <b>${escapeHtml(object.name)}</b>
-        <small>${shapeLabel(object.shape)} · ${object.visible ? 'видим' : 'скрыт'}${object.locked ? ' · замок' : ''}</small>
+        <small>${shapeLabel(object.shape)} · ${object.visible ? 'видим' : 'скрыт'}${object.locked ? ' · замок' : ''}${
+          group ? ` · ${escapeHtml(group.name)}` : ''
+        }</small>
       </span>
       <span class="hero-actions">
+        <button class="icon-mini" type="button" data-action="preset-selection" title="Сохранить в пресеты">☆</button>
         <button class="icon-mini" type="button" data-action="duplicate-object" title="Дублировать">⧉</button>
         <button class="icon-mini danger" type="button" data-action="delete-object" title="Удалить">×</button>
       </span>
@@ -1208,6 +2098,26 @@ function renderObjectInspector(doc: MapDoc): void {
       <div class="field-grid two" style="margin-top:8px">
         ${checkField('visible', 'Видимый', 'Показывать объект в игре и редакторе', object.visible, readOnly)}
         ${checkField('locked', 'Замок', 'Запретить перемещение гизмо', object.locked, readOnly)}
+      </div>
+      <div style="margin-top:8px">
+        <label class="select-field">
+          <span>Группа</span>
+          <select data-role="object-group" ${readOnly ? 'disabled' : ''}>
+            ${groupOptions
+              .map(
+                (option) =>
+                  `<option value="${escapeHtml(option.value)}" ${
+                    (group?.id ?? '') === option.value ? 'selected' : ''
+                  }>${escapeHtml(option.label)}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+      </div>
+      <div class="obj-actions">
+        <button class="btn small" type="button" data-action="preset-selection" ${
+          readOnly ? 'disabled' : ''
+        }>Сохранить в пресеты</button>
       </div>
     </div>
 
@@ -1235,11 +2145,169 @@ function renderObjectInspector(doc: MapDoc): void {
       </div>
     </div>
 
+    ${animationSection(object, readOnly)}
+
     ${
       readOnly
         ? '<div class="readonly-note" style="margin-top:10px"><b>Шаблон только для просмотра.</b>Создайте свою карту, чтобы редактировать объекты.</div>'
         : ''
     }
+  `;
+}
+
+function renderGroupInspector(doc: MapDoc, group: MapObjectGroup): void {
+  const readOnly = isReadOnly(doc);
+  const members = group.objectIds
+    .map((id) => doc.objects.find((object) => object.id === id))
+    .filter((object): object is MapObject => Boolean(object));
+  const animated = members.filter((object) => object.animation?.enabled).length;
+  const nudgeButtons: { delta: Vec3; label: string; title: string }[] = [
+    { delta: [0, 0, -snapStep], label: '↑', title: 'Сдвинуть от камеры' },
+    { delta: [-snapStep, 0, 0], label: '←', title: 'Сдвинуть влево' },
+    { delta: [snapStep, 0, 0], label: '→', title: 'Сдвинуть вправо' },
+    { delta: [0, 0, snapStep], label: '↓', title: 'Сдвинуть к камере' },
+  ];
+  inspectorBody.innerHTML = `
+    <div class="inspector-title-row">
+      <div><span class="eyebrow">Группа</span><h2>${escapeHtml(group.name)}</h2></div>
+      <span class="count-pill">${members.length} об.</span>
+    </div>
+
+    <div class="object-hero group-hero" style="--obj-color:${group.color};--obj-glow:${group.color}">
+      <span class="object-shape">▦</span>
+      <span class="object-hero-copy">
+        <b>${escapeHtml(group.name)}</b>
+        <small>${members.length} объектов · ${animated} с анимацией</small>
+      </span>
+      <span class="hero-actions">
+        <button class="icon-mini" type="button" data-action="preset-selection" title="Сохранить группу в пресеты">☆</button>
+        <button class="icon-mini" type="button" data-action="duplicate-group" title="Скопировать группу">⧉</button>
+        <button class="icon-mini danger" type="button" data-action="delete-object" title="Удалить выбранное">×</button>
+      </span>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-head"><span>Группа</span><small>перемещается целиком</small></div>
+      <label class="text-field">
+        <span>Название группы</span>
+        <input type="text" value="${escapeHtml(group.name)}" maxlength="48" spellcheck="false"
+          data-role="group-name" ${readOnly ? 'disabled' : ''} />
+      </label>
+      <div class="color-field" style="margin-top:8px">
+        <label><span>Цвет метки</span>
+          <input type="color" value="${group.color}" data-role="group-color" ${readOnly ? 'disabled' : ''} />
+        </label>
+        <input class="hex" type="text" value="${group.color}" maxlength="7" data-role="group-color" ${
+          readOnly ? 'disabled' : ''
+        } />
+      </div>
+      <p class="mini-hint" style="margin-top:8px">Гизмо под сценой двигает всю группу. Кнопки ниже помогают сдвинуть её точно по сетке.</p>
+      <div class="nudge-grid">
+        ${nudgeButtons
+          .map(
+            (entry) =>
+              `<button class="btn small" type="button" data-action="nudge-selection" data-delta="${entry.delta.join(
+                ',',
+              )}" title="${entry.title}" ${readOnly ? 'disabled' : ''}>${entry.label}</button>`,
+          )
+          .join('')}
+        <button class="btn small" type="button" data-action="nudge-selection" data-delta="0,-${snapStep},0" ${
+          readOnly ? 'disabled' : ''
+        } title="Опустить">Y−</button>
+        <button class="btn small" type="button" data-action="nudge-selection" data-delta="0,${snapStep},0" ${
+          readOnly ? 'disabled' : ''
+        } title="Поднять">Y+</button>
+      </div>
+      <div class="obj-actions">
+        <button class="btn small" type="button" data-action="rotate-group" data-angle="-90" ${
+          readOnly ? 'disabled' : ''
+        }>⟲ 90°</button>
+        <button class="btn small" type="button" data-action="rotate-group" data-angle="90" ${
+          readOnly ? 'disabled' : ''
+        }>⟳ 90°</button>
+        <button class="btn small" type="button" data-action="snap-selection" ${readOnly ? 'disabled' : ''}>К сетке</button>
+        <button class="btn small" type="button" data-action="focus-selection">Фокус</button>
+      </div>
+      <div class="obj-actions">
+        <button class="btn small" type="button" data-action="preset-selection" ${readOnly ? 'disabled' : ''}>В пресеты</button>
+        <button class="btn small" type="button" data-action="duplicate-group" ${readOnly ? 'disabled' : ''}>Копия группы</button>
+        <button class="btn small" type="button" data-action="dissolve-group" ${readOnly ? 'disabled' : ''}>Расформировать</button>
+      </div>
+      <div class="obj-actions">
+        <button class="btn danger small full" type="button" data-action="delete-group" ${
+          readOnly ? 'disabled' : ''
+        }>Удалить группу и объекты</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-head"><span>Объекты группы</span><small>${members.length}</small></div>
+      <div class="object-list embedded">
+        ${members.map((object) => objectRowHtml(object, true)).join('')}
+      </div>
+    </div>
+
+    ${
+      readOnly
+        ? '<div class="readonly-note" style="margin-top:10px"><b>Шаблон только для просмотра.</b>Создайте свою карту, чтобы менять группы.</div>'
+        : ''
+    }
+  `;
+}
+
+function renderMultiObjectInspector(doc: MapDoc): void {
+  const readOnly = isReadOnly(doc);
+  const objects = selectedObjects();
+  inspectorBody.innerHTML = `
+    <div class="inspector-title-row">
+      <div><span class="eyebrow">Выделение</span><h2>${objects.length} объектов</h2></div>
+      <span class="count-pill">мультивыбор</span>
+    </div>
+
+    <div class="multi-summary">
+      <b>Гизмо двигает всё выделение сразу.</b>
+      <small>Ctrl+клик в сцене или списке добавляет и убирает объекты. Ctrl+G объединяет их в группу.</small>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-head"><span>Действия</span><small>выделение</small></div>
+      <div class="obj-actions">
+        <button class="btn primary small" type="button" data-action="create-group" ${
+          readOnly ? 'disabled' : ''
+        }>Сгруппировать</button>
+        <button class="btn small" type="button" data-action="duplicate-selection" ${
+          readOnly ? 'disabled' : ''
+        }>Копировать</button>
+        <button class="btn small danger" type="button" data-action="delete-object" ${
+          readOnly ? 'disabled' : ''
+        }>Удалить</button>
+      </div>
+      <div class="obj-actions">
+        <button class="btn small" type="button" data-action="preset-selection" ${
+          readOnly ? 'disabled' : ''
+        }>Сохранить в пресеты</button>
+        <button class="btn small" type="button" data-action="focus-selection">Фокус</button>
+      </div>
+      <div class="obj-actions">
+        <button class="btn small" type="button" data-action="align-selection" data-axis="x" ${
+          readOnly ? 'disabled' : ''
+        }>Ровно по X</button>
+        <button class="btn small" type="button" data-action="align-selection" data-axis="z" ${
+          readOnly ? 'disabled' : ''
+        }>Ровно по Z</button>
+        <button class="btn small" type="button" data-action="align-selection" data-axis="y" ${
+          readOnly ? 'disabled' : ''
+        }>Один уровень</button>
+        <button class="btn small" type="button" data-action="snap-selection" ${readOnly ? 'disabled' : ''}>К сетке</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-head"><span>Состав</span><small>${objects.length}</small></div>
+      <div class="object-list embedded">
+        ${objects.map((object) => objectRowHtml(object, false)).join('')}
+      </div>
+    </div>
   `;
 }
 
@@ -1251,6 +2319,7 @@ function refreshPreview(): void {
     preview.setGizmoMode(gizmoMode);
     preview.setSnapping(snapEnabled, snapStep);
     preview.setPlacement(placementShape);
+    preview.setSelectionIds(selectedIds);
   } else {
     preview.setObjects([]);
     preview.setSelection(null);
@@ -1260,6 +2329,7 @@ function refreshPreview(): void {
 function renderAll(): void {
   renderMapLists();
   renderObjects();
+  renderPresets();
   renderTabs();
   renderStage();
   renderMetrics();
@@ -1274,6 +2344,7 @@ function afterChange(options: { inspector?: boolean } = {}): void {
   scheduleSave();
   renderMapLists();
   renderObjects();
+  renderPresets();
   renderStage();
   renderMetrics();
   refreshPreview();
@@ -1351,15 +2422,72 @@ function applyInspectorValue(input: HTMLInputElement | HTMLSelectElement): boole
     if (generated) doc.subtitle = baseSubtitle(base);
   }
   if (tab === 'object' && selectedObject() && path === 'locked') {
-    preview?.setSelection(selectedObjectId);
+    emitSelection();
   }
-  const rerenderInspector = path === 'base' || (input.dataset.type === 'bool' && path.startsWith('env.'));
+  const rerenderInspector =
+    path === 'base' ||
+    path === 'animation.enabled' ||
+    path.endsWith('.property') ||
+    (input.dataset.type === 'bool' && path.startsWith('env.'));
   afterChange({ inspector: rerenderInspector });
   return true;
 }
 
+/** Group name/colour and object group membership use their own handlers. */
+function applyRoleValue(input: HTMLInputElement | HTMLSelectElement): boolean {
+  const role = input.dataset.role;
+  if (!role) return false;
+  const doc = activeDoc();
+  if (!doc || isReadOnly(doc)) return false;
+
+  if (role === 'object-group' && input instanceof HTMLSelectElement) {
+    const current = selectedObjectId ? groupOfObject(doc, selectedObjectId) : null;
+    if ((current?.id ?? '') === input.value) return true;
+    assignObjectToGroup(selectedObjectId, input.value || null);
+    return true;
+  }
+
+  const group = selectedGroupId ? doc.groups.find((entry) => entry.id === selectedGroupId) : null;
+  if (!group) return false;
+
+  if (role === 'group-name' && input instanceof HTMLInputElement) {
+    const name = input.value.trim().slice(0, 48);
+    if (!name) return false;
+    group.name = name;
+    afterChange();
+    return true;
+  }
+
+  if (role === 'group-color') {
+    if (!/^#[0-9a-f]{6}$/i.test(input.value)) return false;
+    group.color = input.value.toLowerCase();
+    afterChange();
+    return true;
+  }
+
+  return false;
+}
+
+function assignObjectToGroup(objectId: string | null, groupId: string | null): void {
+  const doc = activeDoc();
+  if (!doc || !objectId || isReadOnly(doc)) return;
+  const object = doc.objects.find((entry) => entry.id === objectId);
+  if (!object) return;
+  recordUndo();
+  for (const group of doc.groups) {
+    group.objectIds = group.objectIds.filter((id) => id !== objectId);
+  }
+  const target = groupId ? doc.groups.find((entry) => entry.id === groupId) : null;
+  if (target) target.objectIds.push(objectId);
+  syncGroups(doc);
+  applySelection([objectId], objectId, target?.id ?? null);
+  afterChange({ inspector: true });
+  showToast(target ? `Объект добавлен в группу «${target.name}».` : 'Объект убран из группы.');
+}
+
 function syncPairedColor(input: HTMLInputElement | HTMLSelectElement): void {
-  if (input.dataset.type !== 'color') return;
+  const isColor = input.dataset.type === 'color' || input.dataset.role === 'group-color';
+  if (!isColor) return;
   const field = input.closest('.color-field');
   if (!field) return;
   field.querySelectorAll<HTMLInputElement>('input').forEach((other) => {
@@ -1380,12 +2508,21 @@ inspectorBody.addEventListener('pointerdown', (event) => {
 inspectorBody.addEventListener('input', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+  if (applyRoleValue(target)) {
+    syncPairedColor(target);
+    return;
+  }
   if (applyInspectorValue(target)) syncPairedColor(target);
 });
 
 inspectorBody.addEventListener('change', (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+  if (target.dataset.role) {
+    if (applyRoleValue(target)) syncPairedColor(target);
+    endEdit();
+    return;
+  }
   if (target.dataset.type === 'color' && !/^#[0-9a-f]{6}$/i.test(target.value)) {
     renderInspector();
     return;
@@ -1396,19 +2533,111 @@ inspectorBody.addEventListener('change', (event) => {
 
 inspectorBody.addEventListener('focusout', () => endEdit());
 
+inspectorBody.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const target = event.target as HTMLElement;
+  if (target.closest('input, select, textarea, button')) return;
+  const row = target.closest<HTMLElement>('[data-object-id]');
+  if (!row?.dataset.objectId) return;
+  event.preventDefault();
+  selectObjectOnly(row.dataset.objectId);
+});
+
 inspectorBody.addEventListener('click', (event) => {
-  const action = (event.target as HTMLElement).closest<HTMLElement>('[data-action]');
-  if (!action) return;
+  const target = event.target as HTMLElement;
   const doc = activeDoc();
+
+  const eye = target.closest<HTMLElement>('[data-object-eye]');
+  if (eye?.dataset.objectEye) {
+    toggleObjectFlag(eye.dataset.objectEye, 'visible');
+    return;
+  }
+  const lock = target.closest<HTMLElement>('[data-object-lock]');
+  if (lock?.dataset.objectLock) {
+    toggleObjectFlag(lock.dataset.objectLock, 'locked');
+    return;
+  }
+  const objectAction = target.closest<HTMLElement>('[data-object-action]');
+  if (objectAction?.dataset.objectId) {
+    const id = objectAction.dataset.objectId;
+    if (objectAction.dataset.objectAction === 'duplicate') duplicateObject(id);
+    else if (objectAction.dataset.objectAction === 'delete') deleteObjects([id]);
+    else if (objectAction.dataset.objectAction === 'preset') {
+      const object = doc?.objects.find((entry) => entry.id === id);
+      if (object) saveObjectsAsPreset([object], object.name);
+    }
+    return;
+  }
+  const objectRow = target.closest<HTMLElement>('[data-object-id]');
+  if (objectRow?.dataset.objectId) {
+    selectObjectOnly(objectRow.dataset.objectId);
+    return;
+  }
+
+  const action = target.closest<HTMLElement>('[data-action]');
+  if (!action) return;
   switch (action.dataset.action) {
     case 'copy-template':
       if (doc && isBuiltinMapId(doc.id)) copyBuiltinMap(doc.id);
       break;
     case 'duplicate-object':
-      duplicateObject();
+      if (selectedIds.length > 1) duplicateSelectedObjects();
+      else duplicateObject();
       break;
     case 'delete-object':
-      deleteObject();
+      deleteSelectedObjects();
+      break;
+    case 'preset-selection':
+      saveSelectionAsPreset();
+      break;
+    case 'create-group':
+      createGroupFromSelection();
+      break;
+    case 'duplicate-selection':
+      duplicateSelectedObjects();
+      break;
+    case 'duplicate-group':
+      if (selectedGroupId) duplicateGroup(selectedGroupId);
+      break;
+    case 'dissolve-group':
+      if (selectedGroupId) dissolveGroup(selectedGroupId);
+      break;
+    case 'delete-group':
+      if (selectedGroupId) deleteGroupWithObjects(selectedGroupId);
+      break;
+    case 'focus-selection':
+      focusSelection();
+      break;
+    case 'snap-selection':
+      snapSelectedToGrid();
+      break;
+    case 'align-selection': {
+      const axis = action.dataset.axis;
+      if (axis === 'x' || axis === 'y' || axis === 'z') alignSelected(axis);
+      break;
+    }
+    case 'nudge-selection': {
+      const delta = (action.dataset.delta ?? '').split(',').map(Number);
+      if (delta.length === 3 && delta.every((entry) => Number.isFinite(entry))) {
+        nudgeObjects(selectedIds, [delta[0], delta[1], delta[2]]);
+      }
+      break;
+    }
+    case 'rotate-group': {
+      const angle = Number(action.dataset.angle ?? 0);
+      if (selectedGroupId && Number.isFinite(angle)) rotateGroup(selectedGroupId, angle);
+      break;
+    }
+    case 'add-track': {
+      const property = action.dataset.property as MapAnimProperty | undefined;
+      if (property && MAP_ANIM_PROPERTIES.some((entry) => entry.value === property)) addAnimationTrack(property);
+      break;
+    }
+    case 'delete-track':
+      if (action.dataset.trackId) removeAnimationTrack(action.dataset.trackId);
+      break;
+    case 'anim-preset':
+      if (action.dataset.preset) applyObjectAnimationPreset(action.dataset.preset);
       break;
     case 'focus-object':
       if (selectedObjectId) preview?.focusObject(selectedObjectId);
@@ -1522,29 +2751,147 @@ for (const list of [customMapList, builtinMapList]) {
 }
 
 objectList.addEventListener('click', (event) => {
-  const eye = (event.target as HTMLElement).closest<HTMLElement>('[data-object-eye]');
+  const target = event.target as HTMLElement;
+  const doc = activeDoc();
+
+  const groupToggle = target.closest<HTMLElement>('[data-group-toggle]');
+  if (groupToggle?.dataset.groupToggle) {
+    const id = groupToggle.dataset.groupToggle;
+    if (expandedGroups.has(id)) expandedGroups.delete(id);
+    else expandedGroups.add(id);
+    renderObjects();
+    return;
+  }
+
+  const groupEye = target.closest<HTMLElement>('[data-group-eye]');
+  if (groupEye?.dataset.groupEye) {
+    const group = doc?.groups.find((entry) => entry.id === groupEye.dataset.groupEye);
+    if (group) toggleManyObjectsFlag(group.objectIds, 'visible');
+    return;
+  }
+
+  const groupLock = target.closest<HTMLElement>('[data-group-lock]');
+  if (groupLock?.dataset.groupLock) {
+    const group = doc?.groups.find((entry) => entry.id === groupLock.dataset.groupLock);
+    if (group) toggleManyObjectsFlag(group.objectIds, 'locked');
+    return;
+  }
+
+  const groupAction = target.closest<HTMLElement>('[data-group-action]');
+  if (groupAction?.dataset.groupId) {
+    const id = groupAction.dataset.groupId;
+    switch (groupAction.dataset.groupAction) {
+      case 'duplicate':
+        duplicateGroup(id);
+        break;
+      case 'dissolve':
+        dissolveGroup(id);
+        break;
+      case 'preset':
+        {
+          const group = doc?.groups.find((entry) => entry.id === id);
+          if (group) {
+            const members = group.objectIds
+              .map((objectId) => doc?.objects.find((object) => object.id === objectId))
+              .filter((object): object is MapObject => Boolean(object));
+            saveObjectsAsPreset(members, group.name);
+          }
+        }
+        break;
+      default:
+        break;
+    }
+    return;
+  }
+
+  const eye = target.closest<HTMLElement>('[data-object-eye]');
   if (eye?.dataset.objectEye) {
     toggleObjectFlag(eye.dataset.objectEye, 'visible');
     return;
   }
-  const lock = (event.target as HTMLElement).closest<HTMLElement>('[data-object-lock]');
+  const lock = target.closest<HTMLElement>('[data-object-lock]');
   if (lock?.dataset.objectLock) {
     toggleObjectFlag(lock.dataset.objectLock, 'locked');
     return;
   }
-  const action = (event.target as HTMLElement).closest<HTMLElement>('[data-object-action]');
+  const action = target.closest<HTMLElement>('[data-object-action]');
   if (action?.dataset.objectId) {
-    if (action.dataset.objectAction === 'duplicate') duplicateObject(action.dataset.objectId);
-    else if (action.dataset.objectAction === 'delete') deleteObject(action.dataset.objectId);
+    const id = action.dataset.objectId;
+    if (action.dataset.objectAction === 'duplicate') duplicateObject(id);
+    else if (action.dataset.objectAction === 'delete') deleteObjects([id]);
+    else if (action.dataset.objectAction === 'preset') {
+      const object = doc?.objects.find((entry) => entry.id === id);
+      if (object) saveObjectsAsPreset([object], object.name);
+    }
     return;
   }
-  const row = (event.target as HTMLElement).closest<HTMLElement>('[data-object-id]');
-  if (row?.dataset.objectId) selectObject(row.dataset.objectId);
+
+  const groupRow = target.closest<HTMLElement>('[data-group-id]');
+  if (groupRow?.dataset.groupId) {
+    selectGroup(groupRow.dataset.groupId);
+    return;
+  }
+
+  const row = target.closest<HTMLElement>('[data-object-id]');
+  if (row?.dataset.objectId) {
+    selectObjectOnly(row.dataset.objectId, event.ctrlKey || event.metaKey || event.shiftKey);
+  }
 });
 
 objectList.addEventListener('dblclick', (event) => {
-  const row = (event.target as HTMLElement).closest<HTMLElement>('[data-object-id]');
+  const target = event.target as HTMLElement;
+  if (target.closest('[data-group-id]')) {
+    const groupRow = target.closest<HTMLElement>('[data-group-id]');
+    if (groupRow?.dataset.groupId) selectWholeGroup(groupRow.dataset.groupId);
+    return;
+  }
+  const row = target.closest<HTMLElement>('[data-object-id]');
   if (row?.dataset.objectId) preview?.focusObject(row.dataset.objectId);
+});
+
+objectList.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const target = event.target as HTMLElement;
+  if (target.closest('button')) return;
+  const groupRow = target.closest<HTMLElement>('[data-group-id]');
+  if (groupRow?.dataset.groupId) {
+    event.preventDefault();
+    selectGroup(groupRow.dataset.groupId);
+    return;
+  }
+  const row = target.closest<HTMLElement>('[data-object-id]');
+  if (row?.dataset.objectId) {
+    event.preventDefault();
+    selectObjectOnly(row.dataset.objectId, event.ctrlKey || event.metaKey || event.shiftKey);
+  }
+});
+
+presetList.addEventListener('click', (event) => {
+  const action = (event.target as HTMLElement).closest<HTMLElement>('[data-preset-action]');
+  if (action?.dataset.presetId) {
+    const id = action.dataset.presetId;
+    if (action.dataset.presetAction === 'insert') insertPreset(id);
+    else if (action.dataset.presetAction === 'rename') renamePreset(id);
+    else if (action.dataset.presetAction === 'delete') deletePreset(id);
+    return;
+  }
+  const row = (event.target as HTMLElement).closest<HTMLElement>('[data-preset-id]');
+  if (row?.dataset.presetId) insertPreset(row.dataset.presetId);
+});
+
+presetList.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  const row = (event.target as HTMLElement).closest<HTMLElement>('[data-preset-id]');
+  if (!row?.dataset.presetId) return;
+  event.preventDefault();
+  insertPreset(row.dataset.presetId);
+});
+
+byId('savePresetBtn').addEventListener('click', () => saveSelectionAsPreset());
+
+objectSearch.addEventListener('input', () => {
+  objectSearchQuery = objectSearch.value;
+  renderObjects();
 });
 
 // ---------------------------------------------------------------------------
@@ -1585,11 +2932,10 @@ mapSearch.addEventListener('input', () => {
 
 byId('newMapBtn').addEventListener('click', () => createMap());
 byId('clearSelectionBtn').addEventListener('click', () => selectObject(null));
-focusObjectBtn.addEventListener('click', () => {
-  if (selectedObjectId) preview?.focusObject(selectedObjectId);
-});
+focusObjectBtn.addEventListener('click', () => focusSelection());
 byId('focusBoardBtn').addEventListener('click', () => preview?.focusBoard());
-deleteObjectBtn.addEventListener('click', () => deleteObject());
+deleteObjectBtn.addEventListener('click', () => deleteSelectedObjects());
+groupSelectionBtn.addEventListener('click', () => createGroupFromSelection());
 undoBtn.addEventListener('click', undo);
 redoBtn.addEventListener('click', redo);
 
@@ -1624,8 +2970,34 @@ window.addEventListener('keydown', (event) => {
   }
   if (modifier && event.key.toLowerCase() === 'd') {
     event.preventDefault();
-    if (selectedObjectId) duplicateObject();
+    duplicateSelectedObjects();
     return;
+  }
+  if (modifier && event.key.toLowerCase() === 'g') {
+    event.preventDefault();
+    createGroupFromSelection();
+    return;
+  }
+  if (modifier && event.key.toLowerCase() === 'a') {
+    event.preventDefault();
+    const doc = activeDoc();
+    if (doc) applySelection(doc.objects.map((object) => object.id));
+    return;
+  }
+  if (!modifier && !event.altKey) {
+    const step = snapStep > 0 ? snapStep : 0.25;
+    const nudge: Record<string, Vec3> = {
+      arrowleft: [-step, 0, 0],
+      arrowright: [step, 0, 0],
+      arrowup: event.shiftKey ? [0, step, 0] : [0, 0, -step],
+      arrowdown: event.shiftKey ? [0, -step, 0] : [0, 0, step],
+    };
+    const delta = nudge[event.key.toLowerCase()];
+    if (delta && selectedIds.length > 0) {
+      event.preventDefault();
+      nudgeObjects(selectedIds, delta);
+      return;
+    }
   }
   switch (event.key.toLowerCase()) {
     case 'w':
@@ -1638,14 +3010,13 @@ window.addEventListener('keydown', (event) => {
       setGizmoMode('scale');
       break;
     case 'f':
-      if (selectedObjectId) preview?.focusObject(selectedObjectId);
-      else preview?.focusBoard();
+      focusSelection();
       break;
     case 'delete':
     case 'backspace':
-      if (selectedObjectId) {
+      if (selectedIds.length > 0) {
         event.preventDefault();
-        deleteObject();
+        deleteSelectedObjects();
       }
       break;
     case 'escape':
@@ -1766,7 +3137,11 @@ async function saveJsonFile(payload: string, filename: string): Promise<void> {
 
 byId('exportBtn').addEventListener('click', async () => {
   flushSave();
-  const payload = JSON.stringify({ version: 1, savedAt: new Date().toISOString(), maps: state.maps }, null, 2);
+  const payload = JSON.stringify(
+    { version: 1, savedAt: new Date().toISOString(), maps: state.maps, presets: state.presets },
+    null,
+    2,
+  );
   const date = new Date().toISOString().slice(0, 10);
   await saveJsonFile(payload, `auto-flow-maps-${date}.json`);
 });
@@ -1791,14 +3166,24 @@ importFile.addEventListener('change', async () => {
     if (state.maps.length > 0 && !window.confirm(`Импорт заменит текущие карты (${state.maps.length}). Продолжить?`)) {
       return;
     }
+    const hasPresets = Boolean(raw && typeof raw === 'object' && Array.isArray((raw as { presets?: unknown }).presets));
     state.maps = imported.maps;
+    if (hasPresets) state.presets = imported.presets;
     selectedMapId = imported.selectedId ?? imported.maps[0]?.id ?? null;
     selectedObjectId = null;
+    selectedIds = [];
+    selectedGroupId = null;
+    presetInsertCount.clear();
+    resetObjectSearch();
     resetHistory();
     refreshPreview();
     renderAll();
     flushSave();
-    showToast(`Импортировано карт: ${imported.maps.length}.`);
+    showToast(
+      hasPresets
+        ? `Импортировано карт: ${imported.maps.length}, пресетов: ${imported.presets.length}.`
+        : `Импортировано карт: ${imported.maps.length}.`,
+    );
   } catch (error) {
     console.error('Не удалось импортировать карты', error);
     showToast(
@@ -1815,18 +3200,18 @@ importFile.addEventListener('change', async () => {
 // ---------------------------------------------------------------------------
 
 async function seedMapsFromServer(): Promise<void> {
-  if (state.maps.length > 0) return;
   try {
     const response = await fetch('/api/maps', { headers: { accept: 'application/json' }, cache: 'no-store' });
     if (!response.ok) return;
     const payload = (await response.json()) as { maps?: unknown };
-    const maps = normalizeMapList(payload.maps);
-    if (maps.length === 0) return;
-    state.maps = maps;
-    selectedMapId = maps[0].id;
+    if (!Array.isArray(payload.maps)) return;
+    // The server is the source of truth: always replace local browser copies
+    // with the maps that are actually active in the game.
+    state.maps = normalizeMapList(payload.maps);
     saveState(state);
   } catch {
-    // Offline editing still works with localStorage drafts.
+    // Offline editing still works with the local draft.
+    showToast('Не удалось получить карты с сервера — используется локальная копия.', 'warn');
   }
 }
 

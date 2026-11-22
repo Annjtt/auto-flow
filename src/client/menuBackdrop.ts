@@ -7,7 +7,8 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Scene } from '@babylonjs/core/scene';
-import { builtinTheme, envSky, isBuiltinMapId, themeForDoc, type MapDoc, type MapId } from '../shared/maps';
+import { builtinTheme, envSky, isBuiltinMapId, themeForDoc, type MapDoc, type MapId, type MapObject } from '../shared/maps';
+import { applyMapObjectAnimation, createMapObjectMesh, type MapObjectVisual } from './mapObjects';
 import { MapStage } from './mapStage';
 
 /**
@@ -23,9 +24,12 @@ export class MenuBackdrop {
   private readonly dir: DirectionalLight;
   private readonly glow: GlowLayer;
   private readonly materials = new Map<string, StandardMaterial>();
+  private customMats: StandardMaterial[] = [];
+  private customObjects: { visual: MapObjectVisual; object: MapObject }[] = [];
   private stage: MapStage | null = null;
   private mapId: MapId;
   private mapDoc: MapDoc | null = null;
+  private mapSig = '';
   private active = false;
   private time = 0;
   private readonly onResize = (): void => this.engine.resize();
@@ -34,6 +38,7 @@ export class MenuBackdrop {
     this.canvas = canvas;
     this.mapId = mapId;
     this.mapDoc = mapDoc;
+    this.mapSig = mapDoc ? JSON.stringify(mapDoc) : '';
 
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true, alpha: false });
     this.scene = new Scene(this.engine);
@@ -54,6 +59,7 @@ export class MenuBackdrop {
     this.glow.intensity = 0.5;
 
     this.buildStage();
+    this.buildCustomObjects();
     this.applyTheme();
     this.engine.runRenderLoop(() => {
       if (!this.active) return;
@@ -62,6 +68,7 @@ export class MenuBackdrop {
       this.camera.alpha += delta * 0.055;
       this.camera.beta = 0.96 + Math.sin(this.time * 0.16) * 0.035;
       this.stage?.animate(this.time);
+      for (const entry of this.customObjects) applyMapObjectAnimation(entry.visual, entry.object, this.time);
       this.scene.render();
     });
     window.addEventListener('resize', this.onResize);
@@ -78,9 +85,13 @@ export class MenuBackdrop {
   }
 
   setMap(mapId: MapId, mapDoc: MapDoc | null = null): void {
-    if (mapId === this.mapId && mapDoc === this.mapDoc) return;
+    // Compare the document content, not the object identity: a re-published
+    // custom map must rebuild the backdrop even if the reference looks the same.
+    const sig = mapDoc ? JSON.stringify(mapDoc) : '';
+    if (mapId === this.mapId && sig === this.mapSig) return;
     this.mapId = mapId;
     this.mapDoc = mapDoc;
+    this.mapSig = sig;
     this.rebuildWorld();
   }
 
@@ -93,6 +104,17 @@ export class MenuBackdrop {
     this.stage.build();
   }
 
+  /** Props placed in Map Lab, so the backdrop matches the real board. */
+  private buildCustomObjects(): void {
+    if (!this.mapDoc) return;
+    for (const object of this.mapDoc.objects) {
+      if (!object.visible) continue;
+      const visual = createMapObjectMesh(this.scene, object, { pickable: false, namePrefix: 'menuMapObject' });
+      this.customMats.push(visual.material);
+      this.customObjects.push({ visual, object });
+    }
+  }
+
   private rebuildWorld(): void {
     this.stage = null;
     for (const mesh of [...this.scene.meshes]) mesh.dispose(false, false);
@@ -102,7 +124,11 @@ export class MenuBackdrop {
     }
     for (const material of this.materials.values()) material.dispose();
     this.materials.clear();
+    for (const material of this.customMats) material.dispose();
+    this.customMats = [];
+    this.customObjects = [];
     this.buildStage();
+    this.buildCustomObjects();
     this.applyTheme();
   }
 

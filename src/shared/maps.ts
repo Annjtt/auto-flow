@@ -351,6 +351,61 @@ export const MAP_SHAPES: { value: MapShape; label: string; glyph: string }[] = [
 
 export type Vec3 = [number, number, number];
 
+/** Properties an object animation track can drive. */
+export type MapAnimProperty = 'position' | 'rotation' | 'scale' | 'color' | 'emissive' | 'alpha';
+
+export const MAP_ANIM_PROPERTIES: { value: MapAnimProperty; label: string; vector: boolean }[] = [
+  { value: 'position', label: 'Положение', vector: true },
+  { value: 'rotation', label: 'Поворот', vector: true },
+  { value: 'scale', label: 'Размер', vector: true },
+  { value: 'color', label: 'Цвет', vector: false },
+  { value: 'emissive', label: 'Свечение', vector: false },
+  { value: 'alpha', label: 'Прозрачность', vector: false },
+];
+
+export type MapAnimAxis = 'x' | 'y' | 'z';
+export type MapAnimWave = 'sine' | 'triangle' | 'pulse';
+
+export const MAP_ANIM_WAVES: { value: MapAnimWave; label: string }[] = [
+  { value: 'sine', label: 'Плавно' },
+  { value: 'triangle', label: 'Линейно' },
+  { value: 'pulse', label: 'Импульс' },
+];
+
+export interface MapAnimationTrack {
+  id: string;
+  property: MapAnimProperty;
+  /** Axis driven by vector properties. */
+  axis: MapAnimAxis;
+  /**
+   * Oscillation strength: world units for position, degrees for rotation,
+   * a multiplier for scale and an absolute delta for alpha.
+   */
+  amplitude: number;
+  /** Target colour for the colour/emissive tracks. */
+  color: string;
+  wave: MapAnimWave;
+  /** Offset inside the loop, 0..1. */
+  phase: number;
+}
+
+/** A seamless, looped animation applied on top of an object's base values. */
+export interface MapObjectAnimation {
+  enabled: boolean;
+  /** Seconds for one full loop. */
+  duration: number;
+  /** Global loop offset, 0..1. */
+  phase: number;
+  tracks: MapAnimationTrack[];
+}
+
+export const MAP_ANIMATION_LIMITS = {
+  maxTracks: 12,
+  durationMin: 0.2,
+  durationMax: 60,
+  amplitude: 60,
+} as const;
+
 export interface MapObject {
   id: string;
   name: string;
@@ -364,6 +419,16 @@ export interface MapObject {
   alpha: number;
   visible: boolean;
   locked: boolean;
+  /** Optional looped animation, disabled by default. */
+  animation: MapObjectAnimation;
+}
+
+/** A named set of objects that can be moved and copied as a single unit. */
+export interface MapObjectGroup {
+  id: string;
+  name: string;
+  color: string;
+  objectIds: string[];
 }
 
 export interface MapEnvIsland {
@@ -493,6 +558,8 @@ export interface MapDoc {
   /** Composable environment parts (island, sea, sky, particles, stars, surfaces). */
   env: MapEnv;
   objects: MapObject[];
+  /** Named groups used by the editor to move/copy several objects at once. */
+  groups: MapObjectGroup[];
   updatedAt?: string;
 }
 
@@ -635,7 +702,129 @@ export function normalizeMapObject(raw: unknown, index = 0): MapObject {
     alpha: asNumber(source.alpha, 1, 0, 1),
     visible: source.visible !== false,
     locked: source.locked === true,
+    animation: normalizeMapAnimation(source.animation),
   };
+}
+
+export function createAnimationTrack(property: MapAnimProperty = 'position'): MapAnimationTrack {
+  const defaults: Record<MapAnimProperty, { axis: MapAnimAxis; amplitude: number; color: string }> = {
+    position: { axis: 'y', amplitude: 0.25, color: '#ffffff' },
+    rotation: { axis: 'y', amplitude: 45, color: '#ffffff' },
+    scale: { axis: 'y', amplitude: 0.12, color: '#ffffff' },
+    color: { axis: 'x', amplitude: 1, color: '#ffffff' },
+    emissive: { axis: 'x', amplitude: 1, color: '#ffb45e' },
+    alpha: { axis: 'x', amplitude: 0.35, color: '#ffffff' },
+  };
+  const preset = defaults[property];
+  return {
+    id: uniqueId('anim'),
+    property,
+    axis: preset.axis,
+    amplitude: preset.amplitude,
+    color: preset.color,
+    wave: 'sine',
+    phase: 0,
+  };
+}
+
+export function createObjectAnimation(enabled = false): MapObjectAnimation {
+  return { enabled, duration: 3, phase: 0, tracks: [] };
+}
+
+export function normalizeMapAnimation(raw: unknown): MapObjectAnimation {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const tracksSource = Array.isArray(source.tracks) ? source.tracks : [];
+  return {
+    enabled: asBool(source.enabled, false),
+    duration: asNumber(source.duration, 3, MAP_ANIMATION_LIMITS.durationMin, MAP_ANIMATION_LIMITS.durationMax),
+    phase: asNumber(source.phase, 0, 0, 1),
+    tracks: tracksSource
+      .slice(0, MAP_ANIMATION_LIMITS.maxTracks)
+      .map((entry, index) => normalizeAnimationTrack(entry, index)),
+  };
+}
+
+function normalizeAnimationTrack(raw: unknown, index = 0): MapAnimationTrack {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const property = (MAP_ANIM_PROPERTIES.find((entry) => entry.value === source.property)?.value ??
+    'position') as MapAnimProperty;
+  const wave = (MAP_ANIM_WAVES.find((entry) => entry.value === source.wave)?.value ?? 'sine') as MapAnimWave;
+  const axis: MapAnimAxis = source.axis === 'x' || source.axis === 'z' ? source.axis : 'y';
+  const fallback = createAnimationTrack(property);
+  return {
+    id: typeof source.id === 'string' && source.id.length > 0 ? source.id.slice(0, 48) : `track-${index + 1}`,
+    property,
+    axis,
+    amplitude: asNumber(source.amplitude, fallback.amplitude, -MAP_ANIMATION_LIMITS.amplitude, MAP_ANIMATION_LIMITS.amplitude),
+    color: asColor(source.color, fallback.color),
+    wave,
+    phase: asNumber(source.phase, 0, 0, 1),
+  };
+}
+
+export function cloneMapAnimation(animation: MapObjectAnimation | null | undefined): MapObjectAnimation {
+  const source = animation ?? createObjectAnimation(false);
+  return {
+    enabled: source.enabled,
+    duration: source.duration,
+    phase: source.phase,
+    tracks: source.tracks.map((track) => ({ ...track })),
+  };
+}
+
+export function cloneMapObject(object: MapObject): MapObject {
+  return {
+    ...object,
+    position: [...object.position] as Vec3,
+    rotation: [...object.rotation] as Vec3,
+    scale: [...object.scale] as Vec3,
+    animation: cloneMapAnimation(object.animation),
+  };
+}
+
+export function createMapObjectGroup(name = 'Группа', color = '#d9b56c'): MapObjectGroup {
+  return {
+    id: uniqueId('group'),
+    name: name.slice(0, 48),
+    color: asColor(color, '#d9b56c'),
+    objectIds: [],
+  };
+}
+
+/** Finds the group that owns an object, if any. */
+export function groupOfObject(doc: MapDoc | null | undefined, objectId: string | null): MapObjectGroup | null {
+  if (!doc || !objectId) return null;
+  return doc.groups.find((group) => group.objectIds.includes(objectId)) ?? null;
+}
+
+export function normalizeMapObjectGroups(raw: unknown, objects: MapObject[]): MapObjectGroup[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const known = new Set(objects.map((object) => object.id));
+  const claimed = new Set<string>();
+  const usedGroupIds = new Set<string>();
+  const groups: MapObjectGroup[] = [];
+  for (const entry of list) {
+    const source = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    if (!Array.isArray(source.objectIds)) continue;
+    const objectIds: string[] = [];
+    for (const value of source.objectIds) {
+      if (typeof value !== 'string' || !known.has(value) || claimed.has(value)) continue;
+      claimed.add(value);
+      objectIds.push(value);
+    }
+    if (objectIds.length === 0) continue;
+    let id =
+      typeof source.id === 'string' && source.id.length > 0 ? source.id.slice(0, 64) : uniqueId('group');
+    if (usedGroupIds.has(id)) id = uniqueId('group');
+    usedGroupIds.add(id);
+    groups.push({
+      id,
+      name: asString(source.name, `Группа ${groups.length + 1}`, 48),
+      color: asColor(source.color, '#d9b56c'),
+      objectIds,
+    });
+  }
+  return groups;
 }
 
 export function createMapEnvSurface(shape: MapSurfaceShape = 'disc'): MapEnvSurface {
@@ -750,6 +939,9 @@ export function normalizeMapDoc(raw: unknown, fallbackBase: MapBase = 'jaddy'): 
     base === 'none' && baseTheme.sky === '#06070d' && baseTheme.fog === '#080a12'
       ? { ...EMPTY_MAP_THEME, label: baseTheme.label }
       : baseTheme;
+  const objects = objectsSource
+    .slice(0, MAP_LIMITS.maxObjects)
+    .map((entry, index) => normalizeMapObject(entry, index));
   return {
     id: typeof source.id === 'string' && source.id.length > 0 ? source.id.slice(0, 48) : uniqueId('map'),
     name: asString(source.name, 'Новая карта', 48),
@@ -757,9 +949,8 @@ export function normalizeMapDoc(raw: unknown, fallbackBase: MapBase = 'jaddy'): 
     base,
     theme,
     env: normalizeMapEnv(source.env),
-    objects: objectsSource
-      .slice(0, MAP_LIMITS.maxObjects)
-      .map((entry, index) => normalizeMapObject(entry, index)),
+    objects,
+    groups: normalizeMapObjectGroups(source.groups, objects),
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : undefined,
   };
 }
@@ -788,6 +979,7 @@ export function createMapObject(shape: MapShape, position: Vec3 = [0, 0.5, 0]): 
     alpha: 1,
     visible: true,
     locked: false,
+    animation: createObjectAnimation(false),
   };
 }
 
@@ -805,11 +997,18 @@ export function createEmptyMapDoc(base: MapBase = 'none'): MapDoc {
     theme: cloneTheme({ ...baseTheme(base), label: 'Новая карта' }),
     env: emptyMapEnv(),
     objects: [],
+    groups: [],
   };
 }
 
 export function duplicateMapDoc(doc: MapDoc): MapDoc {
   const normalized = normalizeMapDoc(doc);
+  const objects = doc.objects.map((object) => ({
+    ...cloneMapObject(object),
+    id: uniqueId('obj'),
+  }));
+  const idMap = new Map<string, string>();
+  doc.objects.forEach((object, index) => idMap.set(object.id, objects[index]?.id ?? object.id));
   return {
     ...normalized,
     id: uniqueId('map'),
@@ -829,12 +1028,11 @@ export function duplicateMapDoc(doc: MapDoc): MapDoc {
         size: [...surface.size],
       })),
     },
-    objects: doc.objects.map((object) => ({
-      ...object,
-      id: uniqueId('obj'),
-      position: [...object.position],
-      rotation: [...object.rotation],
-      scale: [...object.scale],
+    objects,
+    groups: (doc.groups ?? []).map((group) => ({
+      ...group,
+      id: uniqueId('group'),
+      objectIds: group.objectIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id)),
     })),
   };
 }

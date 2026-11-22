@@ -33,11 +33,12 @@ import {
   type BuiltinMapId,
   type MapDoc,
   type MapId,
+  type MapObject,
   type MapTheme,
 } from '../shared/maps';
 import type { BattleEffectView, BattleSnapshot, UnitView } from '../shared/types';
 import { GROUND_Y, MapStage } from './mapStage';
-import { createMapObjectMesh } from './mapObjects';
+import { applyMapObjectAnimation, createMapObjectMesh, type MapObjectVisual } from './mapObjects';
 import { createUnitModel, type UnitModel } from './unitModels';
 import { computeAnimationFrame } from '../shared/unitAppearance';
 import type { TuningAnimation } from '../shared/tuning';
@@ -244,7 +245,9 @@ export class ArenaScene {
   private stage: MapStage | null = null;
   private mapId: MapId;
   private mapDoc: MapDoc | null = null;
+  private mapSig = '';
   private customMats: StandardMaterial[] = [];
+  private customObjects: { visual: MapObjectVisual; object: MapObject }[] = [];
   private dragPathFx: DragPathFx | null = null;
   private dropJumps = new Map<string, Vector3>();
 
@@ -258,6 +261,7 @@ export class ArenaScene {
     this.callbacks = callbacks;
     this.mapId = mapId;
     this.mapDoc = mapDoc;
+    this.mapSig = mapDoc ? JSON.stringify(mapDoc) : '';
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.03, 0.052, 0.096, 1);
@@ -362,6 +366,7 @@ export class ArenaScene {
       if (!object.visible) continue;
       const visual = createMapObjectMesh(this.scene, object, { pickable: false, namePrefix: 'mapObject' });
       this.customMats.push(visual.material);
+      this.customObjects.push({ visual, object });
     }
   }
 
@@ -386,9 +391,11 @@ export class ArenaScene {
   }
 
   setMap(mapId: MapId, mapDoc: MapDoc | null = null): void {
-    if (mapId === this.mapId && mapDoc === this.mapDoc) return;
+    const sig = mapDoc ? JSON.stringify(mapDoc) : '';
+    if (mapId === this.mapId && sig === this.mapSig) return;
     this.mapId = mapId;
     this.mapDoc = mapDoc;
+    this.mapSig = sig;
     this.rebuildWorld();
   }
 
@@ -422,6 +429,7 @@ export class ArenaScene {
     this.dragPathFx = null;
     for (const material of this.customMats) material.dispose();
     this.customMats = [];
+    this.customObjects = [];
     this.stage = null;
     this.buildStage();
     this.buildCustomObjects();
@@ -1746,6 +1754,7 @@ export class ArenaScene {
 
   private animateEnvironment(): void {
     this.stage?.animate(this.time);
+    for (const entry of this.customObjects) applyMapObjectAnimation(entry.visual, entry.object, this.time);
   }
 
   private animateUnit(visual: UnitVisual, dt: number): void {

@@ -69,14 +69,42 @@
               </div>
               <span id="objectCount" class="count-pill">0</span>
             </div>
+            <div class="search-row compact-search">
+              <span class="search-icon">⌕</span>
+              <input id="objectSearch" type="search" placeholder="Поиск объекта…" autocomplete="off" />
+            </div>
             <div class="object-tools">
-              <span class="object-tools-hint">Клик — выбрать · двойной — фокус</span>
-              <button id="clearSelectionBtn" class="mini-link" type="button">Снять выбор</button>
+              <span class="object-tools-hint">Клик — выбрать · Ctrl — добавить</span>
+              <div class="object-tools-actions">
+                <button id="groupSelectionBtn" class="mini-link" type="button" title="Объединить выбранные объекты в группу (Ctrl+G)">
+                  Сгруппировать
+                </button>
+                <button id="clearSelectionBtn" class="mini-link" type="button">Снять выбор</button>
+              </div>
             </div>
             <div id="objectList" class="object-list"></div>
             <div id="objectEmpty" class="object-empty" hidden>
               Выберите примитив в палитре и кликните по доске.<br />
               <small>Объекты можно двигать, вращать и масштабировать гизмо.</small>
+            </div>
+          </section>
+
+          <section class="presets-half">
+            <div class="roster-head compact-head objects-head">
+              <div>
+                <span class="eyebrow">Заготовки</span>
+                <h2>Пресеты</h2>
+              </div>
+              <span id="presetCount" class="count-pill">0</span>
+            </div>
+            <div class="object-tools">
+              <span class="object-tools-hint">Для быстрой вставки в любую карту</span>
+              <button id="savePresetBtn" class="mini-link" type="button">＋ Сохранить</button>
+            </div>
+            <div id="presetList" class="preset-list"></div>
+            <div id="presetEmpty" class="object-empty" hidden>
+              Пока нет пресетов.<br />
+              <small>Выделите объекты (или группу) и нажмите «Сохранить».</small>
             </div>
           </section>
         </aside>

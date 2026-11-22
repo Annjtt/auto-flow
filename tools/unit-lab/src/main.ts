@@ -1353,4 +1353,27 @@ window.setInterval(() => {
   playState.dataset.state = playback.casting ? 'cast' : playback.attacking ? 'attack' : 'idle';
 }, 70);
 
-renderAll();
+async function seedStateFromServer(): Promise<void> {
+  try {
+    const response = await fetch('/api/tuning', { headers: { accept: 'application/json' }, cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = (await response.json()) as { tuning?: unknown } | null;
+    if (!payload || typeof payload !== 'object') return;
+    if (!payload.tuning || typeof payload.tuning !== 'object') return;
+    // The server holds the balance that is currently applied in the game, so
+    // replace local browser state with it on every lab load.
+    state = normalizeImportedState(payload);
+    saveState(state);
+  } catch {
+    showToast('Не удалось получить настройки с сервера — используется локальная копия.', 'warn');
+  }
+}
+
+async function boot(): Promise<void> {
+  await seedStateFromServer();
+  selectedId = UNITS[0].id;
+  selectedPart = null;
+  renderAll();
+}
+
+void boot();

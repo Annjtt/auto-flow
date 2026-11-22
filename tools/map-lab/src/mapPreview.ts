@@ -35,14 +35,15 @@ import {
   type MapTheme,
   type Vec3,
 } from '../../../src/shared/maps';
-import { applyMapObjectMaterial, applyMapObjectTransform, createMapObjectMesh } from '../../../src/client/mapObjects';
+import { applyMapObjectAnimation, applyMapObjectMaterial, applyMapObjectTransform, createMapObjectMesh } from '../../../src/client/mapObjects';
 import { GROUND_Y, MapStage } from '../../../src/client/mapStage';
 
 export type GizmoMode = 'move' | 'rotate' | 'scale';
 
 export interface MapPreviewCallbacks {
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive: boolean) => void;
   onTransform: (id: string, transform: { position: Vec3; rotation: Vec3; scale: Vec3 }) => void;
+  onGroupTransform: (ids: string[], delta: Vec3) => void;
   onPlace: (position: Vec3) => void;
 }
 
@@ -50,6 +51,8 @@ interface ObjectVisual {
   mesh: Mesh;
   material: StandardMaterial;
   shape: MapShape;
+  animColor?: Color3;
+  animEmissive?: Color3;
 }
 
 function toDegrees(radians: number): number {
@@ -84,9 +87,15 @@ export class MapPreview {
   private readonly stageMaterials = new Map<string, StandardMaterial>();
   private visuals = new Map<string, ObjectVisual>();
   private objects: MapObject[] = [];
+  private objectById = new Map<string, MapObject>();
   private selectedId: string | null = null;
+  private selectedIds: string[] = [];
+  private selectedSet = new Set<string>();
   private hoverId: string | null = null;
   private ghost: ObjectVisual | null = null;
+  private groupPivot: Mesh | null = null;
+  private pivotAnchor = new Vector3(0, 0, 0);
+  private pivotDisabled = true;
   private placementShape: MapShape | null = null;
   private snapEnabled = true;
   private snapStep = 0.25;
@@ -97,6 +106,7 @@ export class MapPreview {
   private theme: MapTheme | null = null;
   private time = 0;
   private placementHalf = 0.5;
+  private wasDragging = false;
 
   constructor(canvas: HTMLCanvasElement, callbacks: MapPreviewCallbacks) {
     this.canvas = canvas;
@@ -140,11 +150,18 @@ export class MapPreview {
     this.gizmos.scaleGizmoEnabled = false;
     this.gizmos.boundingBoxGizmoEnabled = false;
 
+    // Invisible pivot the gizmo is attached to while several objects are selected.
+    this.groupPivot = MeshBuilder.CreateBox('map-group-pivot', { size: 0.001 }, this.scene);
+    this.groupPivot.isVisible = false;
+    this.groupPivot.isPickable = false;
+    this.groupPivot.setEnabled(false);
+
     this.scene.onPointerObservable.add((info) => this.handlePointer(info));
     this.engine.runRenderLoop(() => {
       this.time += this.engine.getDeltaTime() / 1000;
       this.stage?.animate(this.time);
       this.syncMeshTransform();
+      this.animateObjects();
       this.scene.render();
     });
     this.resizeObserver = new ResizeObserver(() => this.engine.resize());
@@ -190,7 +207,10 @@ export class MapPreview {
     this.setTheme(themeForDoc(doc));
     this.objects = doc.objects;
     this.syncObjects();
-    this.setSelection(doc.objects.some((object) => object.id === this.selectedId) ? this.selectedId : null);
+    const alive = new Set(doc.objects.map((object) => object.id));
+    const ids = this.selectedIds.filter((id) => alive.has(id));
+    const primary = this.selectedId && alive.has(this.selectedId) ? this.selectedId : (ids[ids.length - 1] ?? null);
+    this.applySelection(primary, primary ? ids.filter((id) => id !== primary).concat(primary) : []);
     if (!this.framed || baseChanged || islandChanged) {
       this.framed = true;
       this.frameBase(doc.base);
@@ -202,28 +222,84 @@ export class MapPreview {
     this.syncObjects();
   }
 
+  /** Selects one object and drops the rest of the selection. */
   setSelection(id: string | null): void {
-    this.selectedId = id;
-    this.gizmos.attachToMesh(id ? (this.visuals.get(id)?.mesh ?? null) : null);
-    this.updateHighlight();
-    if (id) {
-      const visual = this.visuals.get(id);
-      const object = this.objects.find((entry) => entry.id === id);
-      this.gizmos.positionGizmoEnabled = this.mode === 'move' && Boolean(object) && !object?.locked;
-      this.gizmos.rotationGizmoEnabled = this.mode === 'rotate' && Boolean(object) && !object?.locked;
-      this.gizmos.scaleGizmoEnabled = this.mode === 'scale' && Boolean(object) && !object?.locked;
-      if (visual) this.lastTransform = this.transformSignature(visual.mesh);
-    }
-    if (!id) {
-      this.gizmos.positionGizmoEnabled = false;
+    this.applySelection(id, id ? [id] : []);
+  }
+
+  /** Selects several objects at once, moving them with a shared gizmo pivot. */
+  setSelectionIds(ids: string[]): void {
+    const alive = new Set(this.objects.map((object) => object.id));
+    const unique = [...new Set(ids)].filter((id) => alive.has(id));
+    const primary = unique[unique.length - 1] ?? null;
+    this.applySelection(primary, unique);
+  }
+
+  private applySelection(primary: string | null, ids: string[]): void {
+    this.selectedId = primary;
+    this.selectedIds = [...new Set(ids)];
+    this.selectedSet = new Set(this.selectedIds);
+    const groupMode = this.selectedIds.length > 1;
+    if (groupMode) {
+      if (!this.groupPivot) {
+        this.groupPivot = MeshBuilder.CreateBox('map-group-pivot', { size: 0.001 }, this.scene);
+        this.groupPivot.isVisible = false;
+        this.groupPivot.isPickable = false;
+      }
+      let cx = 0;
+      let cy = 0;
+      let cz = 0;
+      let count = 0;
+      let unlocked = true;
+      for (const id of this.selectedIds) {
+        const object = this.objectById.get(id);
+        if (!object) continue;
+        if (object.locked) unlocked = false;
+        cx += object.position[0];
+        cy += object.position[1];
+        cz += object.position[2];
+        count += 1;
+      }
+      if (count === 0) {
+        this.pivotDisabled = true;
+        this.groupPivot.setEnabled(false);
+        this.gizmos.attachToMesh(null);
+        this.gizmos.positionGizmoEnabled = false;
+        this.gizmos.rotationGizmoEnabled = false;
+        this.gizmos.scaleGizmoEnabled = false;
+        this.updateHighlight();
+        return;
+      }
+      this.groupPivot.position.set(cx / count, cy / count, cz / count);
+      this.groupPivot.setEnabled(true);
+      this.pivotAnchor.copyFrom(this.groupPivot.position);
+      this.pivotDisabled = false;
+      this.gizmos.attachToMesh(this.groupPivot);
+      this.gizmos.positionGizmoEnabled = unlocked && this.mode === 'move';
       this.gizmos.rotationGizmoEnabled = false;
       this.gizmos.scaleGizmoEnabled = false;
+      this.lastTransform = '';
+      this.updateHighlight();
+      return;
     }
+
+    this.pivotDisabled = true;
+    this.groupPivot?.setEnabled(false);
+    this.gizmos.attachToMesh(primary ? (this.visuals.get(primary)?.mesh ?? null) : null);
+    const object = primary ? this.objectById.get(primary) : null;
+    this.gizmos.positionGizmoEnabled = Boolean(primary) && this.mode === 'move' && Boolean(object) && !object?.locked;
+    this.gizmos.rotationGizmoEnabled = Boolean(primary) && this.mode === 'rotate' && Boolean(object) && !object?.locked;
+    this.gizmos.scaleGizmoEnabled = Boolean(primary) && this.mode === 'scale' && Boolean(object) && !object?.locked;
+    if (primary) {
+      const visual = this.visuals.get(primary);
+      if (visual) this.lastTransform = this.transformSignature(visual.mesh);
+    }
+    this.updateHighlight();
   }
 
   setGizmoMode(mode: GizmoMode): void {
     this.mode = mode;
-    this.setSelection(this.selectedId);
+    this.applySelection(this.selectedId, this.selectedIds);
   }
 
   setSnapping(enabled: boolean, step = this.snapStep): void {
@@ -262,6 +338,30 @@ export class MapPreview {
     if (!object) return;
     this.camera.setTarget(new Vector3(object.position[0], object.position[1], object.position[2]));
     this.camera.radius = Math.min(this.camera.radius, 12);
+  }
+
+  /** Frames a whole group/multi-selection around its centroid. */
+  focusObjects(ids: string[]): void {
+    const objects = ids
+      .map((id) => this.objectById.get(id))
+      .filter((object): object is MapObject => Boolean(object));
+    if (objects.length === 0) return;
+    const center = new Vector3(0, 0, 0);
+    for (const object of objects) {
+      center.x += object.position[0];
+      center.y += object.position[1];
+      center.z += object.position[2];
+    }
+    center.scaleInPlace(1 / objects.length);
+    let spread = 0;
+    for (const object of objects) {
+      spread = Math.max(
+        spread,
+        Math.hypot(object.position[0] - center.x, object.position[1] - center.y, object.position[2] - center.z),
+      );
+    }
+    this.camera.setTarget(center);
+    this.camera.radius = Math.min(48, Math.max(8, spread * 2.2 + 9));
   }
 
   focusBoard(): void {
@@ -336,6 +436,7 @@ export class MapPreview {
   }
 
   private syncObjects(): void {
+    this.objectById = new Map(this.objects.map((object) => [object.id, object]));
     const alive = new Set(this.objects.map((object) => object.id));
     for (const [id, visual] of this.visuals) {
       if (alive.has(id)) continue;
@@ -363,8 +464,12 @@ export class MapPreview {
       visual.mesh.metadata = { kind: 'map-object', objectId: object.id };
       visual.mesh.isPickable = object.visible;
     }
-    if (this.selectedId && !alive.has(this.selectedId)) this.setSelection(null);
-    else this.updateHighlight();
+    this.selectedIds = this.selectedIds.filter((id) => alive.has(id));
+    this.selectedSet = new Set(this.selectedIds);
+    if (this.selectedId && !alive.has(this.selectedId)) {
+      this.selectedId = this.selectedIds[this.selectedIds.length - 1] ?? null;
+    }
+    this.updateHighlight();
   }
 
   private updateHighlight(): void {
@@ -373,8 +478,8 @@ export class MapPreview {
       const hover = this.visuals.get(this.hoverId);
       if (hover) this.selectionLayer.addMesh(hover.mesh, Color3.FromHexString('#6db8ff'));
     }
-    if (this.selectedId) {
-      const selected = this.visuals.get(this.selectedId);
+    for (const id of this.selectedIds) {
+      const selected = this.visuals.get(id);
       if (selected) this.selectionLayer.addMesh(selected.mesh, Color3.FromHexString('#f2d89a'));
     }
   }
@@ -427,7 +532,9 @@ export class MapPreview {
 
     if (mesh?.metadata?.kind === 'map-object') {
       const id = String(mesh.metadata.objectId);
-      if (id !== this.selectedId) this.callbacks.onSelect(id);
+      const event = info.event as PointerEvent | undefined;
+      const additive = Boolean(event && (event.ctrlKey || event.metaKey || event.shiftKey));
+      if (additive || id !== this.selectedId) this.callbacks.onSelect(id, additive);
       return;
     }
     // Board tiles, extra surfaces and the invisible island picker deselect the current object.
@@ -436,7 +543,7 @@ export class MapPreview {
       mesh?.metadata?.kind === 'env-surface' ||
       mesh?.metadata?.kind === 'cell'
     ) {
-      this.callbacks.onSelect(null);
+      this.callbacks.onSelect(null, false);
     }
   }
 
@@ -454,21 +561,72 @@ export class MapPreview {
     ].join('|');
   }
 
-  private syncMeshTransform(): void {
-    if (!this.selectedId) return;
+  /** Restores the single selected mesh to its document values before gizmo drag. */
+  private snapPrimaryToBase(): void {
+    if (this.selectedIds.length !== 1 || !this.selectedId) return;
     const visual = this.visuals.get(this.selectedId);
-    if (!visual) return;
+    const object = this.objectById.get(this.selectedId);
+    if (!visual || !object || !object.animation?.enabled || object.animation.tracks.length === 0) return;
+    applyMapObjectTransform(visual.mesh, object);
+    this.lastTransform = this.transformSignature(visual.mesh);
+  }
+
+  private syncMeshTransform(): void {
+    const dragging = this.gizmos.isDragging;
+    // Animated objects sit at base + wave offset; snap back to the document
+    // transform when a drag starts so the move does not bake the offset in.
+    if (dragging && !this.wasDragging) this.snapPrimaryToBase();
+    if (dragging) this.wasDragging = true;
+    if (!dragging && !this.wasDragging) return;
+
+    if (this.selectedIds.length > 1 && this.groupPivot && !this.pivotDisabled) {
+      const pivot = this.groupPivot;
+      const dx = round(pivot.position.x - this.pivotAnchor.x, 4);
+      const dy = round(pivot.position.y - this.pivotAnchor.y, 4);
+      const dz = round(pivot.position.z - this.pivotAnchor.z, 4);
+      if (dx !== 0 || dy !== 0 || dz !== 0) {
+        for (const id of this.selectedIds) {
+          const visual = this.visuals.get(id);
+          if (!visual) continue;
+          visual.mesh.position.x += dx;
+          visual.mesh.position.y += dy;
+          visual.mesh.position.z += dz;
+        }
+        this.pivotAnchor.copyFrom(pivot.position);
+        this.callbacks.onGroupTransform(this.selectedIds.slice(), [dx, dy, dz]);
+      }
+      if (!dragging) this.wasDragging = false;
+      return;
+    }
+
+    const visual = this.selectedId ? this.visuals.get(this.selectedId) : null;
+    if (!visual) {
+      if (!dragging) this.wasDragging = false;
+      return;
+    }
     const signature = this.transformSignature(visual.mesh);
-    if (signature === this.lastTransform) return;
-    this.lastTransform = signature;
-    this.callbacks.onTransform(this.selectedId, {
-      position: [round(visual.mesh.position.x, 3), round(visual.mesh.position.y, 3), round(visual.mesh.position.z, 3)],
-      rotation: [
-        round(toDegrees(visual.mesh.rotation.x), 2),
-        round(toDegrees(visual.mesh.rotation.y), 2),
-        round(toDegrees(visual.mesh.rotation.z), 2),
-      ],
-      scale: [round(visual.mesh.scaling.x, 3), round(visual.mesh.scaling.y, 3), round(visual.mesh.scaling.z, 3)],
-    });
+    if (signature !== this.lastTransform) {
+      this.lastTransform = signature;
+      this.callbacks.onTransform(this.selectedId as string, {
+        position: [round(visual.mesh.position.x, 3), round(visual.mesh.position.y, 3), round(visual.mesh.position.z, 3)],
+        rotation: [
+          round(toDegrees(visual.mesh.rotation.x), 2),
+          round(toDegrees(visual.mesh.rotation.y), 2),
+          round(toDegrees(visual.mesh.rotation.z), 2),
+        ],
+        scale: [round(visual.mesh.scaling.x, 3), round(visual.mesh.scaling.y, 3), round(visual.mesh.scaling.z, 3)],
+      });
+    }
+    if (!dragging) this.wasDragging = false;
+  }
+
+  /** Applies looped object animations without touching the document values. */
+  private animateObjects(): void {
+    const dragging = this.gizmos.isDragging;
+    for (const [id, visual] of this.visuals) {
+      if (dragging && this.selectedSet.has(id)) continue;
+      const object = this.objectById.get(id);
+      if (object) applyMapObjectAnimation(visual, object, this.time);
+    }
   }
 }
