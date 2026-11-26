@@ -2,10 +2,13 @@ import { getUnitDef } from '../shared/content';
 import {
   BENCH_SIZE,
   CLASS_NAMES,
+  MAX_LEVEL,
   PLAYER_ROWS,
   RACE_NAMES,
   SHOP_ODDS,
   STAR_MULTIPLIER,
+  XP_BUY_AMOUNT,
+  XP_BUY_COST,
   type BattleSnapshot,
   type LobbySettings,
   type RoomView,
@@ -290,6 +293,10 @@ const hudUnitCount = byId('hudUnitCount');
 const hudLevelCap = byId('hudLevelCap');
 const hudOpponent = byId('hudOpponent');
 const hudXpText = byId('hudXpText');
+const hudXpPreview = byId('hudXpPreview');
+const xpBtn = byId<HTMLButtonElement>('xpBtn');
+const xpMeter = document.querySelector('.chud-xp-meter') as HTMLElement;
+let xpHover = false;
 const hudPhaseCard = byId('hudPhaseCard');
 const hudFocusRing = document.getElementById('hudFocusRing') as unknown as SVGCircleElement;
 const lobbyBoardPreview = byId('lobbyBoardPreview');
@@ -882,6 +889,7 @@ interface DragState {
   cellValid: boolean;
   overBench: boolean;
   benchValid: boolean;
+  benchIndex: number | null;
   fromWorld: { x: number; z: number } | null;
 }
 
@@ -923,6 +931,7 @@ function beginDrag(uid: string, source: DragSource, event: PointerEvent): void {
     cellValid: false,
     overBench: false,
     benchValid: false,
+    benchIndex: null,
     fromWorld,
   };
   if (source === 'board') scene.setDragging(true);
@@ -980,18 +989,51 @@ function canDropOnCell(cell: { x: number; y: number }): boolean {
   return true;
 }
 
+function benchIndexAt(x: number, y: number): number | null {
+  const cards = Array.from(benchCards.querySelectorAll<HTMLElement>('[data-bench-index]'));
+  if (cards.length === 0) return null;
+  let best: HTMLElement | null = null;
+  let bestDist = Infinity;
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    const dist = Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = card;
+    }
+  }
+  return best?.dataset.benchIndex ? Number(best.dataset.benchIndex) : null;
+}
+
 function updateDropTarget(x: number, y: number): void {
   if (!drag) return;
   const self = room?.self;
-  const overBench = drag.source === 'board' && !benchBar.classList.contains('hidden') && pointInRect(benchBar, x, y);
+  const overBench = !benchBar.classList.contains('hidden') && pointInRect(benchBar, x, y);
   drag.overBench = overBench;
+  drag.benchIndex = overBench ? benchIndexAt(x, y) : null;
   benchBar.classList.remove('drop-valid', 'drop-invalid');
+  for (const card of benchCards.querySelectorAll('.bench-card.drop-target')) {
+    card.classList.remove('drop-target');
+  }
 
   if (overBench) {
-    drag.benchValid = Boolean(self && self.bench.length < BENCH_SIZE);
+    const benchFull = Boolean(self && self.bench.length >= BENCH_SIZE);
+    const targetUnit =
+      drag.benchIndex === null ? undefined : self?.bench[drag.benchIndex];
+    if (drag.source === 'bench') {
+      // Bench -> bench: swap with the hovered unit or move to an empty slot.
+      drag.benchValid = drag.benchIndex !== null;
+    } else {
+      // Board -> bench: full bench only accepts a swap onto an occupied slot.
+      drag.benchValid = Boolean(self && (!benchFull || targetUnit));
+    }
     drag.cell = null;
     drag.cellValid = false;
     benchBar.classList.add(drag.benchValid ? 'drop-valid' : 'drop-invalid');
+    if (drag.benchValid && drag.benchIndex !== null) {
+      const target = benchCards.querySelector<HTMLElement>(`[data-bench-index="${drag.benchIndex}"]`);
+      target?.classList.add('drop-target');
+    }
     scene.setDropHighlight(null, false);
     scene.setDragPath(null, null, false);
     return;
@@ -1012,7 +1054,9 @@ function cleanupDrag(): { state: DragState; wasActive: boolean } | null {
   state.ghost?.remove();
   document.body.classList.remove('dragging-unit');
   benchBar.classList.remove('drop-valid', 'drop-invalid');
-  for (const card of benchCards.querySelectorAll('.bench-card.dragging')) card.classList.remove('dragging');
+  for (const card of benchCards.querySelectorAll('.bench-card.dragging, .bench-card.drop-target')) {
+    card.classList.remove('dragging', 'drop-target');
+  }
   scene.setDragging(false);
   scene.setDraggedUnit(null);
   scene.setDropHighlight(null, false);
@@ -1029,15 +1073,22 @@ function finishDrag(event: PointerEvent): void {
   const cellValid = drag.cellValid;
   const overBench = drag.overBench;
   const benchValid = drag.benchValid;
+  const benchIndex = drag.benchIndex;
   const uid = drag.uid;
   const fromWorld = drag.fromWorld;
   const result = cleanupDrag();
   if (!result?.wasActive) return;
 
   if (overBench && benchValid) {
-    net.send({ type: 'move_unit', uid, to: { type: 'bench' } });
+    net.send({
+      type: 'move_unit',
+      uid,
+      to: { type: 'bench', index: benchIndex ?? undefined },
+    });
     selectedUid = null;
     refreshSelection();
+  } else if (overBench) {
+    toast('На скамью нельзя: она заполнена.', 'error');
   } else if (cell && cellValid) {
     scene.queueDropJump(uid, fromWorld);
     net.send({ type: 'move_unit', uid, to: { type: 'board', x: cell.x, y: cell.y } });
@@ -1053,6 +1104,62 @@ function cancelDrag(): void {
 }
 
 
+function setXpHover(show: boolean): void {
+  if (xpHover === show) return;
+  xpHover = show;
+  renderXpHover();
+}
+
+function renderXpHover(): void {
+  const self = room?.self;
+  if (!self) return;
+  const needed = Math.max(1, self.xpNeeded);
+  if (!xpHover) {
+    hudXpPreview.classList.remove('visible', 'level-up', 'blocked');
+    hudXpText.textContent = self.level >= MAX_LEVEL ? 'макс.' : `${self.xp} / ${needed}`;
+    xpBtn.title =
+      self.level >= MAX_LEVEL
+        ? 'Достигнут максимальный уровень'
+        : `Купить опыт · ${XP_BUY_COST} золота · +${XP_BUY_AMOUNT} XP (F)`;
+    if (tooltip.classList.contains('xp-tip')) hideTooltip();
+    return;
+  }
+
+  const atMax = self.level >= MAX_LEVEL;
+  const gain = atMax ? 0 : XP_BUY_AMOUNT;
+  const startPct = Math.max(0, Math.min(100, (self.xp / needed) * 100));
+  const endPct = Math.max(0, Math.min(100, ((self.xp + gain) / needed) * 100));
+  const levelUp = !atMax && self.xp + gain >= needed;
+  hudXpPreview.style.left = `${startPct.toFixed(2)}%`;
+  hudXpPreview.style.width = `${Math.max(gain > 0 ? 2 : 0, endPct - startPct).toFixed(2)}%`;
+  hudXpPreview.classList.toggle('visible', gain > 0);
+  hudXpPreview.classList.toggle('level-up', levelUp);
+  hudXpPreview.classList.toggle('blocked', self.gold < XP_BUY_COST || atMax);
+  hudXpText.textContent = atMax ? 'макс.' : `${self.xp} / ${needed} (+${gain})`;
+  xpBtn.title = atMax
+    ? 'Достигнут максимальный уровень'
+    : `Купить опыт · ${XP_BUY_COST} золота · +${gain} XP (F)`;
+
+  const goldLine =
+    self.gold >= XP_BUY_COST
+      ? `Стоимость: ${XP_BUY_COST} золота`
+      : `Не хватает ${XP_BUY_COST - self.gold} золота`;
+  const progressLine = atMax
+    ? 'Максимальный уровень'
+    : levelUp
+      ? `Хватит на новый уровень (${self.level + 1})`
+      : `До уровня: ${Math.max(0, needed - self.xp - gain)} XP`;
+  tooltip.classList.remove('player-tip');
+  tooltip.classList.add('xp-tip');
+  tooltip.innerHTML = `
+    <div class="tip-name">Покупка уровня</div>
+    <div class="tip-meta">+${gain} опыта · ${goldLine}</div>
+    <div class="tip-stats"><span>Сейчас ${self.xp} / ${needed}</span><span>${progressLine}</span></div>`;
+  tooltip.classList.remove('hidden');
+  const rect = xpBtn.getBoundingClientRect();
+  positionTooltip(rect.left + rect.width / 2, rect.top);
+}
+
 function renderGame(): void {
   if (!room || !room.self) return;
   const self = room.self;
@@ -1061,7 +1168,7 @@ function renderGame(): void {
   byId('hudLevel').textContent = String(self.level);
   const xpNeeded = Math.max(1, self.xpNeeded);
   byId('hudXpFill').style.width = `${Math.min(100, (self.xp / xpNeeded) * 100)}%`;
-  hudXpText.textContent = `${self.xp} / ${xpNeeded}`;
+  hudXpText.textContent = self.level >= MAX_LEVEL ? 'макс.' : `${self.xp} / ${xpNeeded}`;
   byId('hudRound').textContent = String(room.round);
   byId('hudMaxRounds').textContent = String(room.maxRounds);
   hudUnitCount.textContent = String(self.board.length);
@@ -1088,10 +1195,9 @@ function renderGame(): void {
     self.alive || room.phase === 'waiting' || room.phase === 'finished',
   );
   selectedPanel.classList.toggle('hidden', !canPrepare || !selectedUid);
-  const xpBtn = byId<HTMLButtonElement>('xpBtn');
   const rerollBtn = byId<HTMLButtonElement>('rerollBtn');
   const lockBtn = byId<HTMLButtonElement>('lockBtn');
-  xpBtn.disabled = !canPrepare || self.level >= 9 || self.gold < 4;
+  xpBtn.disabled = !canPrepare || self.level >= MAX_LEVEL || self.gold < XP_BUY_COST;
   rerollBtn.disabled = !canPrepare || self.gold < 2;
   lockBtn.disabled = !canPrepare;
   shopToggleBtn.disabled = !canPrepare;
@@ -1103,6 +1209,7 @@ function renderGame(): void {
   const canSurrender = self.alive && room.phase !== 'finished';
   surrenderBtn.disabled = !canSurrender || surrenderPending;
   surrenderBtn.classList.toggle('hidden', !canSurrender);
+  renderXpHover();
   syncMapLabels();
 }
 
@@ -1269,6 +1376,9 @@ function renderSynergies(): void {
               <div class="syn-body">
                 <div class="syn-line"><b>${escapeHtml(synergy.name)}</b><span>${synergy.count} / ${target}</span></div>
                 <div class="syn-bar"><i style="width:${percent.toFixed(1)}%"></i></div>
+                <div class="syn-thresholds">${synergy.thresholds
+                  .map((value) => `<span class="${synergy.count >= value ? 'on' : ''}">${value}</span>`)
+                  .join('')}</div>
                 <div class="syn-desc">${escapeHtml(effect)}</div>
               </div>
             </div>`;
@@ -1349,16 +1459,17 @@ function renderBench(): void {
   if (sig === benchSig) return;
   benchSig = sig;
   const cards: string[] = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < BENCH_SIZE; i++) {
     const unit = self.bench[i];
     if (!unit) {
-      cards.push('<div class="bench-card empty"></div>');
+      cards.push(`<div class="bench-card empty" data-bench-index="${i}"></div>`);
       continue;
     }
     const def = getUnitDef(unit.defId);
     cards.push(`
       <button class="bench-card race-${def.race} ${selectedUid === unit.uid ? 'selected' : ''}"
-        data-bench-uid="${unit.uid}" data-def="${def.id}" data-star="${unit.star}">
+        data-bench-uid="${unit.uid}" data-bench-index="${i}" data-def="${def.id}" data-star="${unit.star}"
+        title="Перетащите, чтобы поменять местами">
         <span class="bench-preview" data-bench-preview="${i}" aria-hidden="true"></span>
         <span class="bench-stars">${unit.star > 1 ? stars(unit.star) : ''}</span>
         <span class="bench-cost">${def.cost}</span>
@@ -2187,7 +2298,7 @@ function positionTooltip(x: number, y: number): void {
 
 function hideTooltip(): void {
   tooltip.classList.add('hidden');
-  tooltip.classList.remove('player-tip');
+  tooltip.classList.remove('player-tip', 'xp-tip');
   lastTooltipDef = null;
   lastTooltipPlayer = null;
 }
@@ -2355,7 +2466,14 @@ byId('spectatorLeave').addEventListener('click', () => {
 rulesBtn.addEventListener('click', openRulesModal);
 surrenderBtn.addEventListener('click', openSurrenderModal);
 
-byId('xpBtn').addEventListener('click', () => net.send({ type: 'buy_xp' }));
+xpBtn.addEventListener('click', () => net.send({ type: 'buy_xp' }));
+const xpArea = xpBtn.parentElement;
+xpArea?.addEventListener('pointermove', (event) => {
+  const overButton = pointInRect(xpBtn, event.clientX, event.clientY);
+  const overMeter = pointInRect(xpMeter, event.clientX, event.clientY);
+  setXpHover(overButton || overMeter);
+});
+xpArea?.addEventListener('pointerleave', () => setXpHover(false));
 byId('rerollBtn').addEventListener('click', () => net.send({ type: 'reroll' }));
 byId('lockBtn').addEventListener('click', () => net.send({ type: 'toggle_lock' }));
 

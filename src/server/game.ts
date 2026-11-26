@@ -5,6 +5,8 @@ import {
   POOL_COPIES,
   SHOP_ODDS,
   SHOP_SIZE,
+  XP_BUY_AMOUNT,
+  XP_BUY_COST,
   XP_FOR_LEVEL,
   type BattleSnapshot,
   type BenchUnitView,
@@ -603,10 +605,10 @@ export class Game {
     if (!player || !this.canAct(player, silent)) return;
     if (this.phase !== 'prep') return this.fail(player, 'Опыт покупается только в фазе подготовки.', silent);
     if (player.level >= MAX_LEVEL) return this.fail(player, 'Достигнут максимальный уровень.', silent);
-    if (player.gold < 4) return this.fail(player, 'Нужно 4 золота для покупки опыта.', silent);
-    player.gold -= 4;
+    if (player.gold < XP_BUY_COST) return this.fail(player, `Нужно ${XP_BUY_COST} золота для покупки опыта.`, silent);
+    player.gold -= XP_BUY_COST;
     const before = player.level;
-    this.addXp(player, 4);
+    this.addXp(player, XP_BUY_AMOUNT);
     if (player.level > before && !silent) {
       this.callbacks.toast(player.id, `Уровень ${player.level}! Теперь можно выставить ${player.level} бойцов.`);
     }
@@ -624,7 +626,7 @@ export class Game {
   moveUnit(
     playerId: string,
     uid: string,
-    to: { type: 'board'; x: number; y: number } | { type: 'bench' },
+    to: { type: 'board'; x: number; y: number } | { type: 'bench'; index?: number },
     silent = false,
   ): void {
     const player = this.getPlayer(playerId);
@@ -635,12 +637,54 @@ export class Game {
     if (!boardUnit && !benchUnit) return;
 
     if (to.type === 'bench') {
+      const targetIndex =
+        to.index === undefined
+          ? player.bench.length
+          : Math.max(0, Math.min(BENCH_SIZE - 1, Math.floor(to.index)));
+
+      // Reordering inside the bench: drop onto another unit to swap places,
+      // or onto an empty slot to move the unit there.
+      if (benchUnit) {
+        const fromIndex = player.bench.indexOf(benchUnit);
+        if (fromIndex < 0) return;
+        if (targetIndex === fromIndex) return;
+        const targetUnit = player.bench[targetIndex];
+        if (targetUnit) {
+          player.bench[targetIndex] = benchUnit;
+          player.bench[fromIndex] = targetUnit;
+        } else {
+          player.bench.splice(fromIndex, 1);
+          const insert = Math.min(targetIndex, player.bench.length);
+          player.bench.splice(insert, 0, benchUnit);
+        }
+        this.callbacks.roomUpdate();
+        return;
+      }
+
       if (!boardUnit) return;
+
+      // Dropping a board unit onto an occupied bench slot swaps the two units.
+      const benchTarget = to.index === undefined ? undefined : player.bench[targetIndex];
+      if (benchTarget) {
+        const oldX = boardUnit.x;
+        const oldY = boardUnit.y;
+        player.board = player.board.filter((u) => u.uid !== uid);
+        player.bench[targetIndex] = boardUnit;
+        boardUnit.x = 0;
+        boardUnit.y = 0;
+        benchTarget.x = oldX;
+        benchTarget.y = oldY;
+        player.board.push(benchTarget);
+        this.callbacks.roomUpdate();
+        return;
+      }
+
       if (player.bench.length >= BENCH_SIZE) return this.fail(player, 'Скамья заполнена.', silent);
       player.board = player.board.filter((u) => u.uid !== uid);
       boardUnit.x = 0;
       boardUnit.y = 0;
-      player.bench.push(boardUnit);
+      const insert = Math.min(targetIndex, player.bench.length);
+      player.bench.splice(insert, 0, boardUnit);
       this.callbacks.roomUpdate();
       return;
     }

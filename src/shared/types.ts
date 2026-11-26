@@ -44,6 +44,7 @@ export interface SynergyStatus {
   name: string;
   group: 'race' | 'class';
   count: number;
+  thresholds: number[];
   threshold: number;
   next: number | null;
   active: boolean;
@@ -183,7 +184,7 @@ export interface BattleUnitView {
 
 export interface BattleEffectView {
   id: string;
-  kind: 'hit' | 'cast' | 'heal' | 'shield' | 'death' | 'miss' | 'jump';
+  kind: 'hit' | 'crit' | 'cast' | 'heal' | 'shield' | 'death' | 'miss' | 'jump';
   x: number;
   y: number;
   team: 0 | 1;
@@ -220,7 +221,11 @@ export type ClientMessage =
   | { type: 'reroll' }
   | { type: 'buy_xp' }
   | { type: 'toggle_lock' }
-  | { type: 'move_unit'; uid: string; to: { type: 'board'; x: number; y: number } | { type: 'bench' } }
+  | {
+      type: 'move_unit';
+      uid: string;
+      to: { type: 'board'; x: number; y: number } | { type: 'bench'; index?: number };
+    }
   | { type: 'sell_unit'; uid: string }
   | { type: 'surrender' };
 
@@ -240,16 +245,20 @@ export const PLAYER_ROWS = [4, 5, 6, 7];
 export const BENCH_SIZE = 9;
 export const SHOP_SIZE = 5;
 export const MAX_LEVEL = 9;
-export const XP_THRESHOLDS = [0, 2, 4, 6, 10, 16, 22, 30, 40];
+/** Cost in gold of one experience purchase. */
+export const XP_BUY_COST = 4;
+/** Experience granted by one purchase. */
+export const XP_BUY_AMOUNT = 4;
+export const XP_THRESHOLDS = [0, 2, 4, 6, 10, 12, 14, 16, 18];
 export const XP_FOR_LEVEL: Record<number, number> = {
   1: 2,
   2: 4,
   3: 6,
   4: 10,
-  5: 16,
-  6: 22,
-  7: 30,
-  8: 40,
+  5: 12,
+  6: 14,
+  7: 16,
+  8: 18,
   9: 0,
 };
 export const SHOP_ODDS: Record<number, number[]> = {

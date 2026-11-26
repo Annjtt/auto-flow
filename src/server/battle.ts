@@ -19,6 +19,10 @@ import {
 const CELL_STEP_TIME = 0.4;
 /** Duration of the opening assassin leap. */
 const ASSASSIN_JUMP_TIME = 0.7;
+/** Assassins pause briefly so enemy tanks step forward before they leap. */
+const ASSASSIN_JUMP_DELAY = 0.5;
+/** How often passive regeneration is applied (seconds). */
+const REGEN_TICK = 0.5;
 const CELL_DIRECTIONS = [
   { x: 1, y: 0 },
   { x: -1, y: 0 },
@@ -58,6 +62,15 @@ interface SimUnit {
   lifesteal: number;
   dodge: number;
   damageMult: number;
+  /** Chance to ignore the target's dodge (hunter synergy). */
+  accuracy: number;
+  /** Chance to critically strike (assassin synergy). */
+  critChance: number;
+  /** Damage multiplier on a critical strike. */
+  critMult: number;
+  /** Passive health regeneration per second (mech synergy). */
+  regen: number;
+  regenTimer: number;
   shield: number;
   attackTimer: number;
   moveTimer: number;
@@ -71,6 +84,8 @@ interface SimUnit {
   jumpDuration: number;
   jumpFromX: number;
   jumpFromY: number;
+  /** Remaining pause before the opening assassin leap. */
+  jumpDelay: number;
 }
 
 interface RawEffect extends BattleEffectView {
@@ -126,7 +141,7 @@ export class Battle {
     for (const unit of right.units) {
       this.units.push(this.makeUnit(unit, 1, right.ownerId, right.units, leftDebuff));
     }
-    this.assignAssassinJumps();
+    this.scheduleAssassinJumps();
     this.checkEnd();
   }
 
@@ -165,6 +180,11 @@ export class Battle {
       lifesteal: bonus.lifesteal,
       dodge: bonus.dodge,
       damageMult: bonus.damageMult,
+      accuracy: bonus.accuracy,
+      critChance: bonus.critChance,
+      critMult: bonus.critMult,
+      regen: bonus.regen,
+      regenTimer: 0,
       shield: 0,
       attackTimer: 0.2 + this.rng() * 0.25,
       moveTimer: 0.05 + this.rng() * 0.2,
@@ -177,6 +197,7 @@ export class Battle {
       jumpDuration: 0,
       jumpFromX: x,
       jumpFromY: y,
+      jumpDelay: 0,
     };
   }
 
@@ -186,7 +207,7 @@ export class Battle {
     for (const unit of this.units) {
       if (!unit.alive) continue;
       this.updateTimers(unit, dt);
-      if (unit.stunTimer > 0 || unit.jumpTimer > 0) continue;
+      if (unit.stunTimer > 0 || unit.jumpTimer > 0 || unit.jumpDelay > 0) continue;
       const target = this.targetFor(unit);
       if (!target) continue;
       if (this.inAttackRange(unit, target)) {
@@ -222,7 +243,20 @@ export class Battle {
       // nearby enemies instead of chasing the original target across the board.
       unit.huntTargetUid = null;
     }
+    const wasDelayed = unit.jumpDelay > 0;
+    unit.jumpDelay = Math.max(0, unit.jumpDelay - dt);
+    if (wasDelayed && unit.jumpDelay === 0) this.performAssassinJump(unit);
     if (unit.buffTimer > 0) unit.buffTimer = Math.max(0, unit.buffTimer - dt);
+    this.applyRegen(unit, dt);
+  }
+
+  private applyRegen(unit: SimUnit, dt: number): void {
+    if (unit.regen <= 0 || !unit.alive) return;
+    unit.regenTimer += dt;
+    if (unit.regenTimer < REGEN_TICK) return;
+    const amount = unit.maxHp * unit.regen * unit.regenTimer;
+    unit.regenTimer = 0;
+    this.heal(unit, amount);
   }
 
   private nearestEnemy(unit: SimUnit): SimUnit | null {
@@ -324,34 +358,40 @@ export class Battle {
     return y * BOARD_WIDTH + x;
   }
 
-  private assignAssassinJumps(): void {
-    const assassins = this.units.filter(
-      (unit) => unit.alive && getUnitDef(unit.defId).unitClass === 'assassin',
-    );
-    for (const assassin of assassins) {
-      const enemies = this.units
-        .filter((unit) => unit.alive && unit.team !== assassin.team)
-        .sort((a, b) => this.cellDistance(b, assassin) - this.cellDistance(a, assassin));
-      for (const target of enemies) {
-        const cell = this.findJumpCell(assassin, target);
-        if (!cell) continue;
-        const fromX = assassin.x;
-        const fromY = assassin.y;
-        assassin.x = cell.x;
-        assassin.y = cell.y;
-        assassin.huntTargetUid = target.uid;
-        assassin.jumpTimer = ASSASSIN_JUMP_TIME;
-        assassin.jumpDuration = ASSASSIN_JUMP_TIME;
-        assassin.jumpFromX = fromX;
-        assassin.jumpFromY = fromY;
-        assassin.attackTimer = Math.max(assassin.attackTimer, ASSASSIN_JUMP_TIME);
-        assassin.moveTimer = Math.max(assassin.moveTimer, ASSASSIN_JUMP_TIME);
-        this.addEffect('jump', cell.x, cell.y, assassin.team, undefined, fromX, fromY, {
-          sourceUid: assassin.uid,
-          sourceDef: assassin.defId,
-        });
-        break;
-      }
+  private scheduleAssassinJumps(): void {
+    // Assassins freeze briefly at the start of the fight. Enemy tanks step
+    // forward during that pause, which opens their backline for the leap.
+    for (const unit of this.units) {
+      if (!unit.alive) continue;
+      if (getUnitDef(unit.defId).unitClass !== 'assassin') continue;
+      unit.jumpDelay = ASSASSIN_JUMP_DELAY;
+    }
+  }
+
+  private performAssassinJump(assassin: SimUnit): void {
+    if (!assassin.alive || assassin.jumpTimer > 0) return;
+    const enemies = this.units
+      .filter((unit) => unit.alive && unit.team !== assassin.team)
+      .sort((a, b) => this.cellDistance(b, assassin) - this.cellDistance(a, assassin));
+    for (const target of enemies) {
+      const cell = this.findJumpCell(assassin, target);
+      if (!cell) continue;
+      const fromX = assassin.x;
+      const fromY = assassin.y;
+      assassin.x = cell.x;
+      assassin.y = cell.y;
+      assassin.huntTargetUid = target.uid;
+      assassin.jumpTimer = ASSASSIN_JUMP_TIME;
+      assassin.jumpDuration = ASSASSIN_JUMP_TIME;
+      assassin.jumpFromX = fromX;
+      assassin.jumpFromY = fromY;
+      assassin.attackTimer = Math.max(assassin.attackTimer, ASSASSIN_JUMP_TIME);
+      assassin.moveTimer = Math.max(assassin.moveTimer, ASSASSIN_JUMP_TIME);
+      this.addEffect('jump', cell.x, cell.y, assassin.team, undefined, fromX, fromY, {
+        sourceUid: assassin.uid,
+        sourceDef: assassin.defId,
+      });
+      break;
     }
   }
 
@@ -389,7 +429,10 @@ export class Battle {
 
   private attack(attacker: SimUnit, target: SimUnit): void {
     if (!target.alive) return;
-    if (this.rng() < target.dodge) {
+    const dodged = this.rng() < target.dodge;
+    // Hunters can pierce dodge: roll accuracy only when the target actually dodges.
+    const pierced = dodged && this.rng() < attacker.accuracy;
+    if (dodged && !pierced) {
       this.addEffect('miss', target.x, target.y, attacker.team, undefined, attacker.x, attacker.y, {
         sourceUid: attacker.uid,
         sourceDef: attacker.defId,
@@ -397,17 +440,25 @@ export class Battle {
       attacker.mana = Math.min(attacker.maxMana, attacker.mana + 10);
       return;
     }
-    const raw = attacker.attack * attacker.damageMult;
+    const critical = attacker.critChance > 0 && this.rng() < attacker.critChance;
+    const raw = attacker.attack * attacker.damageMult * (critical ? attacker.critMult : 1);
     const damage = Math.max(1, raw * armorMultiplier(target.armor));
-    this.dealDamage(attacker, target, damage, false);
+    this.dealDamage(attacker, target, damage, false, critical);
     attacker.mana = Math.min(attacker.maxMana, attacker.mana + 10);
     if (attacker.lifesteal > 0) {
       this.heal(attacker, damage * attacker.lifesteal);
     }
   }
 
-  private dealDamage(source: SimUnit, target: SimUnit, amount: number, ability: boolean): number {
+  private dealDamage(
+    source: SimUnit,
+    target: SimUnit,
+    amount: number,
+    ability: boolean,
+    critical = false,
+  ): number {
     if (!target.alive) return 0;
+    const effectKind: BattleEffectView['kind'] = critical ? 'crit' : 'hit';
     let remaining = amount;
     if (target.shield > 0) {
       const absorbed = Math.min(target.shield, remaining);
@@ -416,7 +467,7 @@ export class Battle {
       if (absorbed > 0) this.addEffect('shield', target.x, target.y, target.team, Math.round(absorbed));
     }
     if (remaining <= 0) {
-      this.addEffect('hit', target.x, target.y, source.team, 0, source.x, source.y, {
+      this.addEffect(effectKind, target.x, target.y, source.team, 0, source.x, source.y, {
         sourceUid: source.uid,
         sourceDef: source.defId,
       });
@@ -428,7 +479,7 @@ export class Battle {
     } else {
       target.mana = Math.min(target.maxMana, target.mana + Math.min(10, remaining * 0.02));
     }
-    this.addEffect('hit', target.x, target.y, source.team, Math.round(remaining), source.x, source.y, {
+    this.addEffect(effectKind, target.x, target.y, source.team, Math.round(remaining), source.x, source.y, {
       sourceUid: source.uid,
       sourceDef: source.defId,
     });

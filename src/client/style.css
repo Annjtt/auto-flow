@@ -2047,6 +2047,12 @@ input:focus {
   will-change: transform, opacity;
 }
 
+.float-text.crit {
+  color: #ffb347;
+  font-size: 20px;
+  text-shadow: 0 0 12px rgba(255, 150, 40, 0.65), 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+
 .float-text.heal {
   color: #86e6a3;
 }

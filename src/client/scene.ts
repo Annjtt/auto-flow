@@ -208,7 +208,7 @@ interface CastFx {
   alpha?: number;
 }
 
-export type FloatTextKind = 'damage' | 'heal' | 'shield' | 'miss';
+export type FloatTextKind = 'damage' | 'crit' | 'heal' | 'shield' | 'miss';
 
 export interface ArenaCallbacks {
   onCellClick: (x: number, y: number) => void;
@@ -826,11 +826,14 @@ export class ArenaScene {
       if (
         effect.sx !== undefined &&
         effect.sy !== undefined &&
-        (effect.kind === 'hit' || effect.kind === 'miss')
+        (effect.kind === 'hit' || effect.kind === 'crit' || effect.kind === 'miss')
       ) {
         this.spawnTracer(effect.x, effect.y, effect.sx, effect.sy, effect.team, effect.id);
       }
-      if ((effect.kind === 'hit' || effect.kind === 'miss') && effect.sourceUid) {
+      if (
+        (effect.kind === 'hit' || effect.kind === 'crit' || effect.kind === 'miss') &&
+        effect.sourceUid
+      ) {
         this.triggerAttack(effect.sourceUid);
       }
     }
@@ -841,7 +844,10 @@ export class ArenaScene {
     if (!handler) return;
     let text = '';
     let floatKind: FloatTextKind;
-    if (kind === 'hit' && value && value > 0) {
+    if (kind === 'crit' && value && value > 0) {
+      text = `-${value}!`;
+      floatKind = 'crit';
+    } else if (kind === 'hit' && value && value > 0) {
       text = `-${value}`;
       floatKind = 'damage';
     } else if (kind === 'heal' && value && value > 0) {
@@ -1143,7 +1149,11 @@ export class ArenaScene {
     let color = team === 0 ? '#79b6ff' : '#ff7a84';
     let size = 0.28;
     let ttl = 0.45;
-    if (kind === 'heal') {
+    if (kind === 'crit') {
+      color = '#ffb347';
+      size = 0.42;
+      ttl = 0.6;
+    } else if (kind === 'heal') {
       color = '#71e39d';
       ttl = 0.65;
     } else if (kind === 'shield') {

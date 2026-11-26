@@ -152,44 +152,94 @@ export const UNIT_BY_ID: Record<string, UnitDef> = Object.fromEntries(UNITS.map(
 
 export const SYNERGIES: SynergyDef[] = [
   {
-    key: 'human', name: RACE_NAMES.human, group: 'race', ref: 'human', thresholds: [2, 4],
-    effects: ['Все союзники получают +15% к максимальному здоровью.', 'Все союзники получают +30% к максимальному здоровью.'],
+    key: 'human', name: RACE_NAMES.human, group: 'race', ref: 'human', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Все союзники получают +15% к максимальному здоровью.',
+      'Все союзники получают +30% к максимальному здоровью.',
+      'Все союзники получают +45% к максимальному здоровью.',
+      'Все союзники получают +65% к максимальному здоровью.',
+    ],
   },
   {
-    key: 'undead', name: RACE_NAMES.undead, group: 'race', ref: 'undead', thresholds: [2, 4],
-    effects: ['Враги теряют 2 брони.', 'Враги теряют 5 брони.'],
+    key: 'undead', name: RACE_NAMES.undead, group: 'race', ref: 'undead', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Враги теряют 2 брони.',
+      'Враги теряют 5 брони.',
+      'Враги теряют 8 брони.',
+      'Враги теряют 12 брони.',
+    ],
   },
   {
-    key: 'mech', name: RACE_NAMES.mech, group: 'race', ref: 'mech', thresholds: [2, 4],
-    effects: ['Мехи получают +5 брони.', 'Мехи получают +12 брони.'],
+    key: 'mech', name: RACE_NAMES.mech, group: 'race', ref: 'mech', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Мехи получают +5 брони и 0.8% макс. HP/сек регенерации.',
+      'Мехи получают +12 брони и 1.6% макс. HP/сек регенерации.',
+      'Мехи получают +20 брони и 2.4% макс. HP/сек регенерации.',
+      'Мехи получают +30 брони и 3.5% макс. HP/сек регенерации.',
+    ],
   },
   {
-    key: 'beast', name: RACE_NAMES.beast, group: 'race', ref: 'beast', thresholds: [2, 4],
-    effects: ['Все союзники получают +10% скорости атаки.', 'Все союзники получают +25% скорости атаки.'],
+    key: 'beast', name: RACE_NAMES.beast, group: 'race', ref: 'beast', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Все союзники получают +10% скорости атаки.',
+      'Все союзники получают +25% скорости атаки.',
+      'Все союзники получают +40% скорости атаки.',
+      'Все союзники получают +60% скорости атаки.',
+    ],
   },
   {
-    key: 'demon', name: RACE_NAMES.demon, group: 'race', ref: 'demon', thresholds: [2, 4],
-    effects: ['Демоны получают 15% вампиризма.', 'Демоны получают 30% вампиризма.'],
+    key: 'demon', name: RACE_NAMES.demon, group: 'race', ref: 'demon', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Демоны получают 15% вампиризма.',
+      'Демоны получают 30% вампиризма.',
+      'Демоны получают 45% вампиризма.',
+      'Демоны получают 60% вампиризма.',
+    ],
   },
   {
-    key: 'elf', name: RACE_NAMES.elf, group: 'race', ref: 'elf', thresholds: [2, 4],
-    effects: ['Все союзники получают 12% уклонения.', 'Все союзники получают 25% уклонения.'],
+    key: 'elf', name: RACE_NAMES.elf, group: 'race', ref: 'elf', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Все союзники получают 12% уклонения.',
+      'Все союзники получают 25% уклонения.',
+      'Все союзники получают 35% уклонения.',
+      'Все союзники получают 45% уклонения.',
+    ],
   },
   {
-    key: 'warrior', name: CLASS_NAMES.warrior, group: 'class', ref: 'warrior', thresholds: [2, 4],
-    effects: ['Воины получают +5 брони.', 'Воины получают +12 брони.'],
+    key: 'warrior', name: CLASS_NAMES.warrior, group: 'class', ref: 'warrior', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Воины получают +5 брони.',
+      'Воины получают +12 брони.',
+      'Воины получают +20 брони.',
+      'Воины получают +30 брони.',
+    ],
   },
   {
-    key: 'mage', name: CLASS_NAMES.mage, group: 'class', ref: 'mage', thresholds: [2, 4],
-    effects: ['Маги получают +25% силы способностей.', 'Маги получают +60% силы способностей.'],
+    key: 'mage', name: CLASS_NAMES.mage, group: 'class', ref: 'mage', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Маги получают +25% силы способностей.',
+      'Маги получают +60% силы способностей.',
+      'Маги получают +90% силы способностей.',
+      'Маги получают +130% силы способностей.',
+    ],
   },
   {
-    key: 'hunter', name: CLASS_NAMES.hunter, group: 'class', ref: 'hunter', thresholds: [2, 4],
-    effects: ['Охотники получают +15% к атаке.', 'Охотники получают +35% к атаке.'],
+    key: 'hunter', name: CLASS_NAMES.hunter, group: 'class', ref: 'hunter', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Охотники получают +15% к урону и 20% шанс пробить уклонение.',
+      'Охотники получают +35% к урону и 35% шанс пробить уклонение.',
+      'Охотники получают +55% к урону и 50% шанс пробить уклонение.',
+      'Охотники получают +80% к урону и 65% шанс пробить уклонение.',
+    ],
   },
   {
-    key: 'assassin', name: CLASS_NAMES.assassin, group: 'class', ref: 'assassin', thresholds: [2, 4],
-    effects: ['Убийцы получают +15% к урону.', 'Убийцы получают +35% к урону.'],
+    key: 'assassin', name: CLASS_NAMES.assassin, group: 'class', ref: 'assassin', thresholds: [2, 4, 6, 8],
+    effects: [
+      'Убийцы прыгают за спины врагов: +15% урона, 20% шанс крита (200% урона).',
+      'Убийцы прыгают за спины врагов: +35% урона, 30% шанс крита (300% урона).',
+      'Убийцы прыгают за спины врагов: +55% урона, 40% шанс крита (380% урона).',
+      'Убийцы прыгают за спины врагов: +80% урона, 50% шанс крита (450% урона).',
+    ],
   },
 ];
 
@@ -228,6 +278,7 @@ export function computeSynergies(units: { defId: string }[]): SynergyStatus[] {
       name: synergy.name,
       group: synergy.group,
       count,
+      thresholds: synergy.thresholds,
       threshold: tier > 0 ? synergy.thresholds[tier - 1] : 0,
       next: tier < synergy.thresholds.length ? synergy.thresholds[tier] : null,
       active: tier > 0,
@@ -263,6 +314,14 @@ export interface TeamBonuses {
   lifesteal: number;
   damageMult: number;
   enemyArmorReduction: number;
+  /** Chance for hunter attacks to ignore the target's dodge. */
+  accuracy: number;
+  /** Chance for assassin attacks to critically strike. */
+  critChance: number;
+  /** Damage multiplier applied on a critical strike. */
+  critMult: number;
+  /** Fraction of maximum health regenerated per second (mech synergy). */
+  regen: number;
 }
 
 export function createTeamBonuses(): TeamBonuses {
@@ -275,7 +334,16 @@ export function createTeamBonuses(): TeamBonuses {
     lifesteal: 0,
     damageMult: 1,
     enemyArmorReduction: 0,
+    accuracy: 0,
+    critChance: 0,
+    critMult: 1,
+    regen: 0,
   };
+}
+
+/** Returns the value for a 1-based synergy tier, or the fallback when inactive. */
+function tierValue(tier: number, values: readonly number[], fallback: number): number {
+  return tier > 0 ? (values[tier - 1] ?? fallback) : fallback;
 }
 
 export function applySynergiesToUnit(
@@ -286,51 +354,45 @@ export function applySynergiesToUnit(
 ): TeamBonuses {
   const result = { ...bonus };
   const human = synergyBonus(units, 'race', 'human');
-  if (human === 1) result.hpMult *= 1.15;
-  if (human === 2) result.hpMult *= 1.3;
+  result.hpMult *= tierValue(human, [1.15, 1.3, 1.45, 1.65], 1);
 
   const beast = synergyBonus(units, 'race', 'beast');
-  if (beast === 1) result.attackSpeedMult *= 1.1;
-  if (beast === 2) result.attackSpeedMult *= 1.25;
+  result.attackSpeedMult *= tierValue(beast, [1.1, 1.25, 1.4, 1.6], 1);
 
   const elf = synergyBonus(units, 'race', 'elf');
-  if (elf === 1) result.dodge += 0.12;
-  if (elf === 2) result.dodge += 0.25;
+  result.dodge += tierValue(elf, [0.12, 0.25, 0.35, 0.45], 0);
 
   if (race === 'mech') {
     const mech = synergyBonus(units, 'race', 'mech');
-    if (mech === 1) result.armorAdd += 5;
-    if (mech === 2) result.armorAdd += 12;
+    result.armorAdd += tierValue(mech, [5, 12, 20, 30], 0);
+    result.regen += tierValue(mech, [0.008, 0.016, 0.024, 0.035], 0);
   }
   if (race === 'demon') {
     const demon = synergyBonus(units, 'race', 'demon');
-    if (demon === 1) result.lifesteal += 0.15;
-    if (demon === 2) result.lifesteal += 0.3;
+    result.lifesteal += tierValue(demon, [0.15, 0.3, 0.45, 0.6], 0);
   }
   if (unitClass === 'warrior') {
     const warrior = synergyBonus(units, 'class', 'warrior');
-    if (warrior === 1) result.armorAdd += 5;
-    if (warrior === 2) result.armorAdd += 12;
+    result.armorAdd += tierValue(warrior, [5, 12, 20, 30], 0);
   }
   if (unitClass === 'mage') {
     const mage = synergyBonus(units, 'class', 'mage');
-    if (mage === 1) result.spellPower *= 1.25;
-    if (mage === 2) result.spellPower *= 1.6;
+    result.spellPower *= tierValue(mage, [1.25, 1.6, 1.9, 2.3], 1);
   }
   if (unitClass === 'hunter') {
     const hunter = synergyBonus(units, 'class', 'hunter');
-    if (hunter === 1) result.damageMult *= 1.15;
-    if (hunter === 2) result.damageMult *= 1.35;
+    result.damageMult *= tierValue(hunter, [1.15, 1.35, 1.55, 1.8], 1);
+    result.accuracy += tierValue(hunter, [0.2, 0.35, 0.5, 0.65], 0);
   }
   if (unitClass === 'assassin') {
     const assassin = synergyBonus(units, 'class', 'assassin');
-    if (assassin === 1) result.damageMult *= 1.15;
-    if (assassin === 2) result.damageMult *= 1.35;
+    result.damageMult *= tierValue(assassin, [1.15, 1.35, 1.55, 1.8], 1);
+    result.critChance += tierValue(assassin, [0.2, 0.3, 0.4, 0.5], 0);
+    result.critMult = Math.max(result.critMult, tierValue(assassin, [2, 3, 3.8, 4.5], 1));
   }
 
   const undead = synergyBonus(units, 'race', 'undead');
-  if (undead === 1) result.enemyArmorReduction += 2;
-  if (undead === 2) result.enemyArmorReduction += 5;
+  result.enemyArmorReduction += tierValue(undead, [2, 5, 8, 12], 0);
 
   return result;
 }
