@@ -172,10 +172,10 @@ export const SYNERGIES: SynergyDef[] = [
   {
     key: 'mech', name: RACE_NAMES.mech, group: 'race', ref: 'mech', thresholds: [2, 4, 6, 8],
     effects: [
-      'Мехи получают +5 брони и 0.8% макс. HP/сек регенерации.',
-      'Мехи получают +12 брони и 1.6% макс. HP/сек регенерации.',
-      'Мехи получают +20 брони и 2.4% макс. HP/сек регенерации.',
-      'Мехи получают +30 брони и 3.5% макс. HP/сек регенерации.',
+      'Мехи получают +5 брони и 1% макс. HP/сек регенерации.',
+      'Мехи получают +12 брони и 1.9% макс. HP/сек регенерации.',
+      'Мехи получают +20 брони и 2.8% макс. HP/сек регенерации.',
+      'Мехи получают +30 брони и 4% макс. HP/сек регенерации.',
     ],
   },
   {
@@ -217,10 +217,10 @@ export const SYNERGIES: SynergyDef[] = [
   {
     key: 'mage', name: CLASS_NAMES.mage, group: 'class', ref: 'mage', thresholds: [2, 4, 6, 8],
     effects: [
-      'Маги получают +25% силы способностей.',
-      'Маги получают +60% силы способностей.',
-      'Маги получают +90% силы способностей.',
-      'Маги получают +130% силы способностей.',
+      'Маги получают +25% силы способностей, а враги теряют 15% магического сопротивления.',
+      'Маги получают +60% силы способностей, а враги теряют 25% магического сопротивления.',
+      'Маги получают +90% силы способностей, а враги теряют 35% магического сопротивления.',
+      'Маги получают +130% силы способностей, а враги теряют 45% магического сопротивления.',
     ],
   },
   {
@@ -314,6 +314,8 @@ export interface TeamBonuses {
   lifesteal: number;
   damageMult: number;
   enemyArmorReduction: number;
+  /** Fraction of enemy magic resistance removed by the mage synergy. */
+  enemyMagicResistReduction: number;
   /** Chance for hunter attacks to ignore the target's dodge. */
   accuracy: number;
   /** Chance for assassin attacks to critically strike. */
@@ -334,6 +336,7 @@ export function createTeamBonuses(): TeamBonuses {
     lifesteal: 0,
     damageMult: 1,
     enemyArmorReduction: 0,
+    enemyMagicResistReduction: 0,
     accuracy: 0,
     critChance: 0,
     critMult: 1,
@@ -365,7 +368,7 @@ export function applySynergiesToUnit(
   if (race === 'mech') {
     const mech = synergyBonus(units, 'race', 'mech');
     result.armorAdd += tierValue(mech, [5, 12, 20, 30], 0);
-    result.regen += tierValue(mech, [0.008, 0.016, 0.024, 0.035], 0);
+    result.regen += tierValue(mech, [0.01, 0.019, 0.028, 0.04], 0);
   }
   if (race === 'demon') {
     const demon = synergyBonus(units, 'race', 'demon');
@@ -375,10 +378,12 @@ export function applySynergiesToUnit(
     const warrior = synergyBonus(units, 'class', 'warrior');
     result.armorAdd += tierValue(warrior, [5, 12, 20, 30], 0);
   }
+  const mage = synergyBonus(units, 'class', 'mage');
   if (unitClass === 'mage') {
-    const mage = synergyBonus(units, 'class', 'mage');
     result.spellPower *= tierValue(mage, [1.25, 1.6, 1.9, 2.3], 1);
   }
+  // Mages shred enemy magic resistance for the whole team, not just mages.
+  result.enemyMagicResistReduction += tierValue(mage, [0.15, 0.25, 0.35, 0.45], 0);
   if (unitClass === 'hunter') {
     const hunter = synergyBonus(units, 'class', 'hunter');
     result.damageMult *= tierValue(hunter, [1.15, 1.35, 1.55, 1.8], 1);

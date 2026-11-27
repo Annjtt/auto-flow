@@ -249,7 +249,6 @@ export const MAX_LEVEL = 9;
 export const XP_BUY_COST = 4;
 /** Experience granted by one purchase. */
 export const XP_BUY_AMOUNT = 4;
-export const XP_THRESHOLDS = [0, 2, 4, 6, 10, 12, 14, 16, 18];
 export const XP_FOR_LEVEL: Record<number, number> = {
   1: 2,
   2: 4,

@@ -53,6 +53,8 @@ interface SimUnit {
   maxHp: number;
   attack: number;
   armor: number;
+  /** Fraction of incoming spell damage reduced; mage synergy pushes it negative. */
+  magicResist: number;
   attackSpeed: number;
   baseAttackSpeed: number;
   range: number;
@@ -107,6 +109,15 @@ function armorMultiplier(armor: number): number {
   return 1 - Math.max(0, armor) / (Math.max(0, armor) + 25);
 }
 
+/**
+ * Magic resistance is stored as a fraction: 0 is no resistance, positive
+ * values reduce incoming spell damage and negative values (from the mage
+ * synergy) amplify it.
+ */
+function magicMultiplier(magicResist: number): number {
+  return Math.max(0, 1 - magicResist);
+}
+
 export class Battle {
   round: number;
   time = 0;
@@ -134,12 +145,14 @@ export class Battle {
     const rightBonuses = this.computeBonusForTeam(right.units);
     const leftDebuff = leftBonuses.enemyArmorReduction;
     const rightDebuff = rightBonuses.enemyArmorReduction;
+    const leftMagicDebuff = leftBonuses.enemyMagicResistReduction;
+    const rightMagicDebuff = rightBonuses.enemyMagicResistReduction;
 
     for (const unit of left.units) {
-      this.units.push(this.makeUnit(unit, 0, left.ownerId, left.units, rightDebuff));
+      this.units.push(this.makeUnit(unit, 0, left.ownerId, left.units, rightDebuff, rightMagicDebuff));
     }
     for (const unit of right.units) {
-      this.units.push(this.makeUnit(unit, 1, right.ownerId, right.units, leftDebuff));
+      this.units.push(this.makeUnit(unit, 1, right.ownerId, right.units, leftDebuff, leftMagicDebuff));
     }
     this.scheduleAssassinJumps();
     this.checkEnd();
@@ -151,7 +164,7 @@ export class Battle {
     return applySynergiesToUnit(createTeamBonuses(), def.race, def.unitClass, units);
   }
 
-  private makeUnit(unit: UnitView, team: 0 | 1, ownerId: string, teamUnits: UnitView[], enemyArmorDebuff: number): SimUnit {
+  private makeUnit(unit: UnitView, team: 0 | 1, ownerId: string, teamUnits: UnitView[], enemyArmorDebuff: number, enemyMagicDebuff: number): SimUnit {
     const def = getUnitDef(unit.defId);
     const starMult = STAR_MULTIPLIER[unit.star] ?? 1;
     const bonus = applySynergiesToUnit(createTeamBonuses(), def.race, def.unitClass, teamUnits);
@@ -171,6 +184,7 @@ export class Battle {
       maxHp,
       attack: def.attack * starMult,
       armor: Math.max(0, def.armor + bonus.armorAdd - enemyArmorDebuff),
+      magicResist: -enemyMagicDebuff,
       attackSpeed: def.attackSpeed * bonus.attackSpeedMult,
       baseAttackSpeed: def.attackSpeed * bonus.attackSpeedMult,
       range: def.range,
@@ -459,7 +473,7 @@ export class Battle {
   ): number {
     if (!target.alive) return 0;
     const effectKind: BattleEffectView['kind'] = critical ? 'crit' : 'hit';
-    let remaining = amount;
+    let remaining = ability ? amount * magicMultiplier(target.magicResist) : amount;
     if (target.shield > 0) {
       const absorbed = Math.min(target.shield, remaining);
       target.shield -= absorbed;

@@ -191,12 +191,17 @@ interface FxVisual {
   mode: 'burst' | 'tracer';
 }
 
+interface CastFxPart {
+  mesh: Mesh;
+  velocity: Vector3;
+}
+
 interface CastFx {
   node: TransformNode;
   material: StandardMaterial;
   born: number;
   ttl: number;
-  kind: 'aura' | 'ring' | 'beam' | 'projectile' | 'icon';
+  kind: 'aura' | 'ring' | 'beam' | 'projectile' | 'icon' | 'lightning' | 'spark' | 'dome' | 'slash' | 'pillar' | 'rune';
   from?: Vector3;
   to?: Vector3;
   base?: Vector3;
@@ -206,6 +211,11 @@ interface CastFx {
   rise?: number;
   arc?: number;
   alpha?: number;
+  /** Milliseconds to wait before the effect becomes visible. */
+  delay?: number;
+  parts?: CastFxPart[];
+  gravity?: number;
+  angle?: number;
 }
 
 export type FloatTextKind = 'damage' | 'crit' | 'heal' | 'shield' | 'miss';
@@ -1234,10 +1244,321 @@ export class ArenaScene {
       else visual.castTimer = visual.animation.castDuration;
     }
     const iconHeight = visual ? Math.max(1.5, visual.model.height * visual.model.gradeScale + 0.18) : 1.55;
+    const primary = targets[0];
 
+    // Every cast starts with a small glow on the caster. The per-unit recipes
+    // below add the actual spell signature on top of it.
     this.spawnAura(caster, color, 0.9);
     this.spawnIcon(caster, icon, color, 0.9, iconHeight);
 
+    switch (def.id) {
+      case 'squire': {
+        if (!primary) break;
+        this.spawnBeam(caster, primary, color, 0.13, 0.22);
+        this.spawnRing(primary, color, 1.5, 0.45);
+        this.spawnDome(primary, color, 1.2, 0.4);
+        this.spawnIcon(primary, 'shield', color, 0.95, 1.4);
+        this.spawnIcon(primary, 'stun', '#ffe36e', 0.72, 1.72, 120);
+        this.spawnSparks(primary, '#dbe9ff', 10, 1.5, 0.45, { up: 1.4, gravity: -4 });
+        break;
+      }
+      case 'lightfoot': {
+        if (!primary) break;
+        this.spawnProjectile(caster, primary, color, 'dagger', 0.35);
+        this.spawnSlash(primary, color, 0.95, -0.55, 0.32);
+        this.spawnSlash(primary, '#ffffff', 0.7, 1.1, 0.26, 70);
+        this.spawnRing(primary, color, 1.0, 0.3);
+        this.spawnSparks(primary, '#d8ffd0', 8, 1.2, 0.4, { up: 0.8, gravity: -3 });
+        break;
+      }
+      case 'arcanist': {
+        const radius = def.ability.radius ?? 2;
+        this.spawnRune(caster, color, 1.7, 0.65);
+        if (primary) {
+          this.spawnProjectile(caster, primary, color, 'orb', 0.45);
+          this.spawnDome(primary, color, radius * 2, 0.6);
+          this.spawnRing(primary, color, radius * 2, 0.55);
+        }
+        for (const target of targets) {
+          this.spawnRing(target, color, 1.1, 0.45, 60);
+          this.spawnIcon(target, 'star', color, 0.7, 1.45, 60);
+          this.spawnSparks(target, '#d9c4ff', 8, 1.4, 0.5, { up: 1.6, gravity: -3, delay: 60 });
+        }
+        break;
+      }
+      case 'paladin': {
+        this.spawnRing(caster, '#ffe28a', 2.4, 0.8);
+        this.spawnRune(caster, '#ffe28a', 1.9, 0.8);
+        this.spawnIcon(caster, 'swords', color, 1.1, iconHeight + 0.12);
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          this.spawnDome(target, '#ffe28a', 1.5, 0.7, i * 40);
+          this.spawnIcon(target, 'shield', color, 0.85, 1.48, i * 40);
+          this.spawnPillar(target, '#ffe28a', 1.5, 0.5, 0.55, i * 40);
+          this.spawnBeam(caster, target, '#ffe28a', 0.05, 0.35, i * 40);
+          this.spawnSparks(target, '#fff3b0', 7, 1.0, 0.6, { up: 1.5, gravity: -2, delay: i * 40 });
+        }
+        break;
+      }
+      case 'ghoul': {
+        this.spawnRing(caster, '#ff5a6a', 1.8, 0.5);
+        for (const target of targets) {
+          this.spawnAura(target, '#ff5a6a', 0.7);
+          this.spawnIcon(target, 'claw', color, 0.75, 1.45);
+          this.spawnPillar(target, '#ff3a4a', 0.9, 0.4, 0.5);
+          this.spawnSparks(target, '#ff5a6a', 10, 1.1, 0.6, { up: 1.7, gravity: -2.5 });
+        }
+        break;
+      }
+      case 'crypt_archer': {
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          this.spawnProjectile(caster, target, color, 'arrow', 0.5, { delay: i * 60 });
+          this.spawnRing(target, color, 0.95, 0.35, i * 60);
+          this.spawnIcon(target, 'arrow', color, 0.7, 1.45, i * 60);
+          this.spawnSparks(target, '#e8ffd8', 6, 1.0, 0.4, { up: 0.8, gravity: -4, delay: i * 60 });
+        }
+        break;
+      }
+      case 'necromancer': {
+        this.spawnRune(caster, '#8a3cff', 1.6, 0.7);
+        if (primary) {
+          this.spawnBeam(primary, caster, '#8a3cff', 0.14, 0.7);
+          this.spawnDome(primary, '#6a2ab0', 1.4, 0.6);
+          this.spawnIcon(primary, 'skull', color, 0.85, 1.5);
+          this.spawnRing(primary, '#8a3cff', 1.2, 0.5);
+          for (let i = 0; i < 4; i++) {
+            this.spawnProjectile(primary, caster, '#b06cff', 'orb', 0.4, { delay: 40 + i * 70, startY: 0.75 });
+          }
+          this.spawnSparks(primary, '#b06cff', 10, 1.1, 0.6, { up: 1.2, gravity: -1.5 });
+        }
+        break;
+      }
+      case 'bone_dragon': {
+        this.spawnRune(caster, '#bff5ff', 2.0, 0.7);
+        for (const target of targets) {
+          this.spawnBeam(caster, target, '#bff5ff', 0.16, 0.5);
+          this.spawnDome(target, '#dff8ff', 1.6, 0.55);
+          this.spawnIcon(target, 'snow', color, 0.8, 1.5);
+          this.spawnIcon(target, 'stun', '#dff8ff', 0.7, 1.75, 100);
+          this.spawnSparks(target, '#ffffff', 12, 1.6, 0.7, { up: 2.2, gravity: -6 });
+        }
+        break;
+      }
+      case 'scrapbot': {
+        this.spawnRune(caster, color, 1.4, 0.7);
+        this.spawnDome(caster, color, 1.3, 0.7);
+        this.spawnPillar(caster, color, 1.2, 0.4, 0.6);
+        this.spawnIcon(caster, 'gear', color, 0.85, iconHeight + 0.1);
+        this.spawnSparks(caster, '#ffe8a0', 14, 1.3, 0.65, { up: 1.9, gravity: -2.5 });
+        break;
+      }
+      case 'steamgunner': {
+        this.spawnSparks(caster, '#ffcf80', 6, 0.8, 0.25, { up: 0.7, gravity: -1.5 });
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          this.spawnProjectile(caster, target, color, 'bullet', 0.45, { delay: i * 70 });
+          this.spawnRing(target, color, 0.85, 0.3, i * 70);
+          this.spawnIcon(target, 'bullet', color, 0.7, 1.45, i * 70);
+          this.spawnSparks(target, '#ffcf80', 5, 0.9, 0.35, { up: 0.8, gravity: -3, delay: i * 70 });
+        }
+        break;
+      }
+      case 'sparkmage': {
+        this.spawnRune(caster, color, 1.5, 0.6);
+        let previous = caster;
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          const delay = i * 45;
+          this.spawnLightning(previous, target, color, 0.075, 0.45, delay);
+          this.spawnLightning(previous, target, '#ffffff', 0.03, 0.35, delay + 20);
+          this.spawnRing(target, color, 1.05, 0.4, delay);
+          this.spawnIcon(target, 'bolt', color, 0.72, 1.45, delay);
+          this.spawnSparks(target, '#bff8ff', 8, 1.5, 0.4, { up: 1.2, gravity: -4, delay });
+          previous = target;
+        }
+        break;
+      }
+      case 'siege_colossus': {
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          const delay = i * 90;
+          this.spawnProjectile(caster, target, '#ff8a5a', 'rocket', 0.6, { delay });
+          this.spawnDome(target, '#ff8a5a', 2.0, 0.6, delay + 200);
+          this.spawnRing(target, '#ff8a5a', 2.0, 0.55, delay + 200);
+          this.spawnSparks(target, '#ffb066', 12, 1.8, 0.6, { up: 2.0, gravity: -5, delay: delay + 200 });
+        }
+        if (primary) this.spawnRing(primary, '#ff8a5a', (def.ability.radius ?? 2.5) * 2, 0.65);
+        break;
+      }
+      case 'direwolf': {
+        if (!primary) break;
+        this.spawnSlash(primary, color, 0.95, -0.5, 0.3);
+        this.spawnSlash(primary, color, 0.8, 0.55, 0.3, 50);
+        this.spawnSlash(primary, '#fff0d8', 0.65, 1.5, 0.28, 100);
+        this.spawnRing(primary, color, 1.1, 0.35);
+        this.spawnIcon(primary, 'claw', color, 0.9, 1.45);
+        this.spawnSparks(primary, '#ffd0a0', 10, 1.3, 0.45, { up: 1.0, gravity: -4 });
+        break;
+      }
+      case 'boar_rider': {
+        if (!primary) break;
+        this.spawnSparks(caster, '#d8b080', 12, 1.4, 0.5, { up: 1.0, gravity: -3 });
+        this.spawnBeam(caster, primary, color, 0.2, 0.25);
+        this.spawnRing(primary, color, 1.6, 0.45);
+        this.spawnDome(primary, color, 1.3, 0.4);
+        this.spawnIcon(primary, 'tusk', color, 0.9, 1.4);
+        this.spawnIcon(primary, 'stun', '#ffe36e', 0.72, 1.72, 120);
+        this.spawnSparks(primary, '#ffe0b0', 10, 1.4, 0.45, { up: 1.2, gravity: -4 });
+        break;
+      }
+      case 'owl_sage': {
+        this.spawnRing(caster, color, 2.0, 0.7);
+        this.spawnRune(caster, color, 1.8, 0.7);
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          this.spawnDome(target, color, 1.35, 0.65, i * 30);
+          this.spawnAura(target, color, 0.75, i * 30);
+          this.spawnIcon(target, 'feather', color, 0.72, 1.5, i * 30);
+          this.spawnSparks(target, '#d8ffe0', 7, 0.9, 0.8, { up: 1.8, gravity: -1.2, delay: i * 30 });
+        }
+        break;
+      }
+      case 'elder_bear': {
+        this.spawnRing(caster, color, 2.7, 0.75);
+        this.spawnRing(caster, '#ffd9a0', 1.9, 0.55, 60);
+        this.spawnDome(caster, color, 2.4, 0.65);
+        this.spawnIcon(caster, 'paw', color, 1.0, iconHeight + 0.1);
+        this.spawnSparks(caster, '#e8c090', 14, 2.0, 0.65, { up: 1.5, gravity: -2 });
+        for (const target of targets) {
+          this.spawnAura(target, color, 0.7, 80);
+          this.spawnIcon(target, 'paw', color, 0.7, 1.45, 80);
+        }
+        break;
+      }
+      case 'imp': {
+        this.spawnSparks(caster, '#ff9a4a', 6, 0.8, 0.3, { up: 0.8, gravity: -1 });
+        if (!primary) break;
+        this.spawnProjectile(caster, primary, color, 'flame', 0.5);
+        this.spawnDome(primary, '#ff7a3a', 1.4, 0.5, 120);
+        this.spawnRing(primary, color, 1.2, 0.45, 120);
+        this.spawnPillar(primary, '#ff5a2a', 1.0, 0.45, 0.45, 120);
+        this.spawnSparks(primary, '#ffb066', 12, 1.5, 0.55, { up: 1.8, gravity: -4, delay: 120 });
+        break;
+      }
+      case 'hellhound': {
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          const delay = i * 45;
+          this.spawnProjectile(caster, target, color, 'flame', 0.5, { delay });
+          this.spawnRing(target, color, 1.4, 0.45, delay + 100);
+          this.spawnDome(target, '#ff6a2a', 1.3, 0.5, delay + 100);
+          this.spawnSparks(target, '#ffb066', 8, 1.4, 0.5, { up: 1.6, gravity: -4, delay: delay + 100 });
+        }
+        break;
+      }
+      case 'doomguard': {
+        this.spawnRing(caster, color, 2.2, 0.6);
+        this.spawnSlash(caster, color, 1.5, -0.9, 0.4);
+        this.spawnSlash(caster, '#ffb08a', 1.2, 1.4, 0.4, 70);
+        this.spawnPillar(caster, '#ff5a3a', 1.1, 0.5, 0.5);
+        for (const target of targets) {
+          this.spawnRing(target, color, 1.2, 0.4, 60);
+          this.spawnIcon(target, 'blades', color, 0.8, 1.5, 60);
+          this.spawnSparks(target, '#ffb08a', 8, 1.4, 0.45, { up: 1.2, gravity: -4, delay: 60 });
+        }
+        break;
+      }
+      case 'pit_fiend': {
+        this.spawnRune(caster, '#ff5a3a', 2.2, 0.8);
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          const impact = 250 + i * 60;
+          this.spawnProjectile(new Vector3(target.x, 0, target.z), target, '#ff7a4a', 'flame', 0.5, {
+            startY: 4.2,
+            arc: 0,
+            delay: 90 + i * 60,
+          });
+          this.spawnDome(target, '#ff5a3a', 2.2, 0.65, impact);
+          this.spawnRing(target, '#ff5a3a', 2.4, 0.6, impact);
+          this.spawnPillar(target, '#ff3a2a', 1.6, 0.6, 0.6, impact);
+          this.spawnSparks(target, '#ffb066', 14, 2.0, 0.7, { up: 2.4, gravity: -6, delay: impact });
+        }
+        break;
+      }
+      case 'scout': {
+        if (!primary) break;
+        this.spawnBeam(caster, primary, color, 0.05, 0.25);
+        this.spawnProjectile(caster, primary, color, 'arrow', 0.4);
+        this.spawnSlash(primary, color, 0.7, Math.atan2(primary.x - caster.x, primary.z - caster.z), 0.3);
+        this.spawnRing(primary, color, 1.0, 0.35);
+        this.spawnSparks(primary, '#e0ffc0', 8, 1.2, 0.4, { up: 0.9, gravity: -4 });
+        break;
+      }
+      case 'blade_dancer': {
+        this.spawnRing(caster, color, 2.2, 0.7);
+        this.spawnSlash(caster, color, 1.4, 0, 0.5);
+        this.spawnSlash(caster, '#ffffff', 1.2, 2.1, 0.45, 70);
+        this.spawnSlash(caster, color, 1.0, 4.2, 0.4, 140);
+        for (const target of targets) {
+          this.spawnRing(target, color, 1.1, 0.4, 60);
+          this.spawnIcon(target, 'blades', color, 0.78, 1.48, 60);
+          this.spawnSparks(target, '#d8fff0', 8, 1.3, 0.45, { up: 1.2, gravity: -4, delay: 60 });
+        }
+        break;
+      }
+      case 'starweaver': {
+        this.spawnRune(caster, color, 1.7, 0.7);
+        const enemy = targets.length > 1 ? targets[targets.length - 1] : undefined;
+        if (enemy) {
+          this.spawnBeam(caster, enemy, '#e8d68a', 0.09, 0.5);
+          this.spawnProjectile(new Vector3(enemy.x, 0, enemy.z), enemy, color, 'star', 0.5, {
+            startY: 4.2,
+            arc: 0,
+            delay: 80,
+          });
+          this.spawnDome(enemy, color, 1.5, 0.6, 200);
+          this.spawnRing(enemy, color, 1.4, 0.5, 200);
+          this.spawnIcon(enemy, 'star', color, 0.85, 1.5, 200);
+          this.spawnSparks(enemy, '#f0e4ff', 10, 1.5, 0.6, { up: 1.8, gravity: -3, delay: 200 });
+        }
+        const self = targets[0];
+        if (self) {
+          this.spawnDome(self, color, 1.5, 0.7);
+          this.spawnIcon(self, 'star', color, 0.75, 1.5);
+          this.spawnSparks(self, '#e8d68a', 8, 1.0, 0.7, { up: 1.4, gravity: -2 });
+        }
+        break;
+      }
+      case 'ancient_warden': {
+        this.spawnRing(caster, color, 2.1, 0.7);
+        this.spawnRune(caster, color, 1.8, 0.7);
+        for (let i = 0; i < targets.length; i++) {
+          const target = targets[i];
+          this.spawnDome(target, color, 1.45, 0.7, i * 40);
+          this.spawnIcon(target, 'shield', color, 0.82, 1.5, i * 40);
+          this.spawnPillar(target, '#8fdc78', 1.0, 0.5, 0.5, i * 40);
+          this.spawnSparks(target, '#d8ffc0', 8, 1.0, 0.7, { up: 1.5, gravity: -2, delay: i * 40 });
+        }
+        break;
+      }
+      default: {
+        this.playGenericAbilityCast(def, effect, caster, targets, color, icon, projectile, iconHeight);
+        break;
+      }
+    }
+  }
+
+  private playGenericAbilityCast(
+    def: ReturnType<typeof getUnitDef>,
+    effect: BattleEffectView,
+    caster: Vector3,
+    targets: Vector3[],
+    color: string,
+    icon: string,
+    projectile: string,
+    iconHeight: number,
+  ): void {
     const primary = targets[0];
     const ranged = def.range > 1.4;
 
@@ -1249,36 +1570,15 @@ export class ArenaScene {
           this.spawnAura(target, color, 0.85);
           this.spawnIcon(target, def.id === 'paladin' ? 'shield' : icon, color, 0.8, 1.48);
         }
-        if (def.id === 'paladin') {
-          for (const target of targets) this.spawnIcon(target, 'swords', color, 1.12, 1.68);
-          this.spawnIcon(caster, 'swords', color, 1.12, iconHeight + 0.12);
-          this.spawnRing(caster, color, 2.2, 0.9);
-        }
-        if (def.id === 'elder_bear') this.spawnRing(caster, color, 2.4, 0.8);
-        if (def.id === 'ancient_warden') this.spawnRing(caster, color, 1.9, 0.75);
-        if (def.id === 'starweaver' && targets.length > 0) {
-          const enemy = targets[targets.length - 1];
-          this.spawnBeam(caster, enemy, '#e8d68a', 0.1, 0.5);
-          this.spawnIcon(enemy, 'star', color, 0.85, 1.48);
-        }
         break;
       }
       case 'chain': {
-        if (def.id === 'steamgunner') {
-          for (const target of targets) {
-            this.spawnProjectile(caster, target, color, 'bullet', 0.5);
-            this.spawnRing(target, color, 0.9, 0.4);
-            this.spawnIcon(target, icon, color, 0.75, 1.45);
-          }
-        } else {
-          let previous = caster;
-          for (let index = 0; index < targets.length; index++) {
-            const target = targets[index];
-            this.spawnBeam(previous, target, color, 0.07, 0.4);
-            this.spawnRing(target, color, 0.9, 0.4);
-            this.spawnIcon(target, icon, color, 0.75, 1.45);
-            if (index < 6) previous = target;
-          }
+        let previous = caster;
+        for (const target of targets) {
+          this.spawnBeam(previous, target, color, 0.07, 0.4);
+          this.spawnRing(target, color, 0.9, 0.4);
+          this.spawnIcon(target, icon, color, 0.75, 1.45);
+          previous = target;
         }
         break;
       }
@@ -1289,17 +1589,6 @@ export class ArenaScene {
           this.spawnIcon(target, icon, color, 0.8, 1.45);
         }
         if (ranged && primary) this.spawnProjectile(caster, primary, color, projectile, 0.5);
-        if (def.id === 'bone_dragon') {
-          for (const target of targets) {
-            this.spawnBeam(caster, target, '#bff5ff', 0.14, 0.5);
-            this.spawnIcon(target, 'stun', '#dff8ff', 0.75, 1.7);
-          }
-        }
-        if (def.id === 'siege_colossus') {
-          for (const target of targets) this.spawnProjectile(caster, target, '#ff8a5a', 'rocket', 0.7);
-        }
-        if (def.id === 'blade_dancer') this.spawnRing(caster, color, 2.1, 0.7);
-        if (def.id === 'doomguard') this.spawnRing(caster, color, 1.8, 0.6);
         break;
       }
       case 'drain': {
@@ -1317,10 +1606,6 @@ export class ArenaScene {
           if (effect.ability === 'stun') this.spawnIcon(target, 'stun', '#ffe36e', 0.75, 1.7);
         }
         if (ranged && primary) this.spawnProjectile(caster, primary, color, projectile, 0.45);
-        if (def.id === 'boar_rider' && primary) {
-          this.spawnBeam(caster, primary, color, 0.16, 0.28);
-          this.spawnRing(primary, color, 1.3, 0.45);
-        }
         if (def.id === 'squire') this.spawnIcon(caster, 'shield', color, 0.75, iconHeight);
         break;
       }
@@ -1338,7 +1623,7 @@ export class ArenaScene {
     return mat;
   }
 
-  private spawnAura(at: Vector3, color: string, ttl: number): void {
+  private spawnAura(at: Vector3, color: string, ttl: number, delay = 0): void {
     const material = this.fxMaterial(color, 0.85);
     const node = new TransformNode(`fx-aura-${this.fxSeq++}`, this.scene);
     node.position.set(at.x, 0.05, at.z);
@@ -1363,10 +1648,11 @@ export class ArenaScene {
       endScale: 1.15,
       spin: 1.5,
       alpha: 0.85,
+      delay,
     });
   }
 
-  private spawnRing(at: Vector3, color: string, diameter: number, ttl: number): void {
+  private spawnRing(at: Vector3, color: string, diameter: number, ttl: number, delay = 0): void {
     const material = this.fxMaterial(color, 0.9);
     const node = new TransformNode(`fx-ring-${this.fxSeq++}`, this.scene);
     node.position.set(at.x, 0.07, at.z);
@@ -1384,10 +1670,11 @@ export class ArenaScene {
       startScale: 0.2,
       endScale: Math.max(0.4, diameter),
       alpha: 0.9,
+      delay,
     });
   }
 
-  private spawnBeam(from: Vector3, to: Vector3, color: string, width: number, ttl: number): void {
+  private spawnBeam(from: Vector3, to: Vector3, color: string, width: number, ttl: number, delay = 0): void {
     const dx = to.x - from.x;
     const dz = to.z - from.z;
     const distance = Math.hypot(dx, dz);
@@ -1407,16 +1694,24 @@ export class ArenaScene {
       ttl: ttl * 1000,
       kind: 'beam',
       alpha: 0.9,
+      delay,
     });
   }
 
-  private spawnProjectile(from: Vector3, to: Vector3, color: string, style: string, ttl: number): void {
-    const start = new Vector3(from.x, 0.68, from.z);
-    const end = new Vector3(to.x, 0.66, to.z);
+  private spawnProjectile(
+    from: Vector3,
+    to: Vector3,
+    color: string,
+    style: string,
+    ttl: number,
+    opts: { delay?: number; startY?: number; endY?: number; arc?: number; spin?: number } = {},
+  ): void {
+    const start = new Vector3(from.x, opts.startY ?? 0.68, from.z);
+    const end = new Vector3(to.x, opts.endY ?? 0.66, to.z);
     const { node, material } = this.buildProjectileNode(style, color);
     node.position.copyFrom(start);
     node.rotation.y = Math.atan2(end.x - start.x, end.z - start.z);
-    const arc = style === 'rocket' ? 0.55 : style === 'flame' ? 0.16 : style === 'orb' || style === 'star' ? 0.22 : 0.04;
+    const arc = opts.arc ?? (style === 'rocket' ? 0.55 : style === 'flame' ? 0.16 : style === 'orb' || style === 'star' ? 0.22 : 0.04);
     this.castFx.push({
       node,
       material,
@@ -1426,8 +1721,9 @@ export class ArenaScene {
       from: start,
       to: end,
       arc,
-      spin: style === 'orb' || style === 'bolt' || style === 'star' ? 7 : 0,
+      spin: opts.spin ?? (style === 'orb' || style === 'bolt' || style === 'star' ? 7 : 0),
       alpha: 0.95,
+      delay: opts.delay ?? 0,
     });
   }
 
@@ -1538,7 +1834,7 @@ export class ArenaScene {
     return { node, material };
   }
 
-  private spawnIcon(at: Vector3, shape: string, color: string, scale: number, height: number): void {
+  private spawnIcon(at: Vector3, shape: string, color: string, scale: number, height: number, delay = 0): void {
     const material = this.fxMaterial(color, 0.95);
     const node = new TransformNode(`fx-icon-${this.fxSeq++}`, this.scene);
     node.position.set(at.x, height, at.z);
@@ -1722,13 +2018,257 @@ export class ArenaScene {
       spin: 1.3,
       rise: 0.42,
       alpha: 0.95,
+      delay,
+    });
+  }
+
+  private spawnLightning(from: Vector3, to: Vector3, color: string, width: number, ttl: number, delay = 0): void {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance < 0.3) return;
+    const material = this.fxMaterial(color, 0.95);
+    const node = new TransformNode(`fx-lightning-${this.fxSeq++}`, this.scene);
+    const steps = Math.max(3, Math.round(distance / 0.32));
+    const points: Vector3[] = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const jitter = i === 0 || i === steps ? 0 : 0.13;
+      points.push(
+        new Vector3(
+          from.x + dx * t + (Math.random() - 0.5) * jitter,
+          0.72 + (Math.random() - 0.5) * jitter,
+          from.z + dz * t + (Math.random() - 0.5) * jitter,
+        ),
+      );
+    }
+    const addSegment = (a: Vector3, b: Vector3, segmentWidth: number): void => {
+      const sx = b.x - a.x;
+      const sy = b.y - a.y;
+      const sz = b.z - a.z;
+      const length = Math.hypot(sx, sy, sz);
+      if (length < 0.01) return;
+      const segment = MeshBuilder.CreateBox(
+        `fx-lightning-seg-${this.fxSeq++}`,
+        { width: segmentWidth, height: segmentWidth, depth: length },
+        this.scene,
+      );
+      segment.parent = node;
+      segment.material = material;
+      segment.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, (a.z + b.z) / 2);
+      segment.rotation.y = Math.atan2(sx, sz);
+      segment.rotation.x = -Math.atan2(sy, Math.hypot(sx, sz));
+      segment.isPickable = false;
+    };
+    for (let i = 0; i < points.length - 1; i++) addSegment(points[i], points[i + 1], width);
+    // Small forks make the arc read as lightning instead of a straight beam.
+    const nx = dx / distance;
+    const nz = dz / distance;
+    for (let i = 1; i < points.length - 1; i++) {
+      if (Math.random() > 0.4) continue;
+      const origin = points[i];
+      const branch = new Vector3(
+        origin.x + nx * 0.2 + (Math.random() - 0.5) * 0.5,
+        origin.y + (Math.random() - 0.5) * 0.45,
+        origin.z + nz * 0.2 + (Math.random() - 0.5) * 0.5,
+      );
+      addSegment(origin, branch, width * 0.6);
+    }
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'lightning',
+      alpha: 0.95,
+      delay,
+    });
+  }
+
+  private spawnSparks(
+    at: Vector3,
+    color: string,
+    count: number,
+    spread: number,
+    ttl: number,
+    opts: { up?: number; gravity?: number; size?: number; delay?: number; y?: number } = {},
+  ): void {
+    const material = this.fxMaterial(color, 0.95);
+    const node = new TransformNode(`fx-sparks-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, opts.y ?? 0.55, at.z);
+    const parts: CastFxPart[] = [];
+    for (let i = 0; i < count; i++) {
+      const size = (opts.size ?? 0.075) * (0.6 + Math.random() * 0.8);
+      const mesh = MeshBuilder.CreateSphere(`fx-spark-${this.fxSeq++}`, { diameter: size, segments: 5 }, this.scene);
+      mesh.parent = node;
+      mesh.material = material;
+      mesh.position.set((Math.random() - 0.5) * 0.16, (Math.random() - 0.5) * 0.16, (Math.random() - 0.5) * 0.16);
+      mesh.isPickable = false;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = spread * (0.35 + Math.random() * 0.9);
+      parts.push({
+        mesh,
+        velocity: new Vector3(
+          Math.cos(angle) * speed,
+          (opts.up ?? 1.2) * (0.45 + Math.random() * 0.9),
+          Math.sin(angle) * speed,
+        ),
+      });
+    }
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'spark',
+      parts,
+      gravity: opts.gravity ?? -3,
+      alpha: 0.95,
+      delay: opts.delay ?? 0,
+    });
+  }
+
+  private spawnDome(at: Vector3, color: string, diameter: number, ttl: number, delay = 0): void {
+    const material = this.fxMaterial(color, 0.32);
+    const node = new TransformNode(`fx-dome-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0.02, at.z);
+    node.scaling.setAll(0.15);
+    const dome = MeshBuilder.CreateSphere(`fx-dome-mesh-${this.fxSeq++}`, { diameter: 1, segments: 12 }, this.scene);
+    dome.parent = node;
+    dome.material = material;
+    dome.isPickable = false;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'dome',
+      startScale: 0.15,
+      endScale: Math.max(0.5, diameter),
+      alpha: 0.32,
+      delay,
+    });
+  }
+
+  private spawnSlash(at: Vector3, color: string, radius: number, angle: number, ttl: number, delay = 0): void {
+    const material = this.fxMaterial(color, 0.95);
+    const node = new TransformNode(`fx-slash-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0.62, at.z);
+    node.rotation.y = angle;
+    const segments = 5;
+    for (let i = 0; i < segments; i++) {
+      const t = i / (segments - 1) - 0.5;
+      const arcAngle = t * 1.6;
+      const blade = MeshBuilder.CreateBox(
+        `fx-slash-mesh-${this.fxSeq++}`,
+        { width: 0.055, height: 0.035, depth: 0.46 },
+        this.scene,
+      );
+      blade.parent = node;
+      blade.material = material;
+      blade.position.set(Math.sin(arcAngle) * radius, 0, Math.cos(arcAngle) * radius);
+      blade.rotation.y = arcAngle;
+      blade.rotation.z = -0.35 * Math.abs(t);
+      blade.isPickable = false;
+    }
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'slash',
+      startScale: 0.55,
+      endScale: 1.15,
+      spin: 2.6,
+      alpha: 0.95,
+      angle,
+      delay,
+    });
+  }
+
+  private spawnPillar(at: Vector3, color: string, height: number, diameter: number, ttl: number, delay = 0): void {
+    const material = this.fxMaterial(color, 0.75);
+    const node = new TransformNode(`fx-pillar-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0, at.z);
+    const pillar = MeshBuilder.CreateCylinder(
+      `fx-pillar-mesh-${this.fxSeq++}`,
+      { diameterTop: diameter * 0.55, diameterBottom: diameter, height, tessellation: 10 },
+      this.scene,
+    );
+    pillar.parent = node;
+    pillar.material = material;
+    pillar.position.y = height / 2;
+    pillar.isPickable = false;
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'pillar',
+      startScale: 1,
+      alpha: 0.7,
+      delay,
+    });
+  }
+
+  private spawnRune(at: Vector3, color: string, diameter: number, ttl: number, delay = 0): void {
+    const material = this.fxMaterial(color, 0.75);
+    const node = new TransformNode(`fx-rune-${this.fxSeq++}`, this.scene);
+    node.position.set(at.x, 0.055, at.z);
+    node.scaling.setAll(0.35);
+    const outer = MeshBuilder.CreateTorus(
+      `fx-rune-mesh-${this.fxSeq++}`,
+      { diameter: 1, thickness: 0.028, tessellation: 40 },
+      this.scene,
+    );
+    outer.parent = node;
+    outer.material = material;
+    outer.isPickable = false;
+    const inner = MeshBuilder.CreateTorus(
+      `fx-rune-mesh-${this.fxSeq++}`,
+      { diameter: 0.66, thickness: 0.016, tessellation: 32 },
+      this.scene,
+    );
+    inner.parent = node;
+    inner.material = material;
+    inner.isPickable = false;
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const tick = MeshBuilder.CreateBox(
+        `fx-rune-tick-${this.fxSeq++}`,
+        { width: 0.02, height: 0.012, depth: 0.15 },
+        this.scene,
+      );
+      tick.parent = node;
+      tick.material = material;
+      tick.position.set(Math.cos(angle) * 0.36, 0, Math.sin(angle) * 0.36);
+      tick.rotation.y = -angle;
+      tick.isPickable = false;
+    }
+    this.castFx.push({
+      node,
+      material,
+      born: performance.now(),
+      ttl: ttl * 1000,
+      kind: 'rune',
+      startScale: 0.35,
+      endScale: diameter,
+      spin: 0.9,
+      alpha: 0.8,
+      delay,
     });
   }
 
   private animateCastFx(now: number): void {
     for (let i = this.castFx.length - 1; i >= 0; i--) {
       const fx = this.castFx[i];
-      const age = (now - fx.born) / fx.ttl;
+      const startedAt = fx.born + (fx.delay ?? 0);
+      if (now < startedAt) {
+        fx.node.setEnabled(false);
+        continue;
+      }
+      fx.node.setEnabled(true);
+      const age = (now - startedAt) / fx.ttl;
       if (age >= 1) {
         fx.node.dispose(false, false);
         fx.material.dispose();
@@ -1736,29 +2276,89 @@ export class ArenaScene {
         continue;
       }
       const t = Math.max(0, Math.min(1, age));
-      if (fx.kind === 'projectile' && fx.from && fx.to) {
-        fx.node.position.set(
-          fx.from.x + (fx.to.x - fx.from.x) * t,
-          fx.from.y + (fx.to.y - fx.from.y) * t + Math.sin(Math.PI * t) * (fx.arc ?? 0),
-          fx.from.z + (fx.to.z - fx.from.z) * t,
-        );
-        if (fx.spin) fx.node.rotation.z = t * fx.spin;
-      } else if (fx.kind === 'icon' && fx.base) {
-        fx.node.position.y = fx.base.y + (fx.rise ?? 0.35) * t;
-        fx.node.rotation.y = t * (fx.spin ?? 1.3);
-        const scale = (fx.startScale ?? 1) * (1 + Math.sin(t * Math.PI) * 0.14);
-        fx.node.scaling.setAll(scale);
-      } else if (fx.kind === 'ring') {
-        const scale = (fx.startScale ?? 0.2) + ((fx.endScale ?? 2) - (fx.startScale ?? 0.2)) * t;
-        fx.node.scaling.setAll(scale);
-      } else if (fx.kind === 'aura') {
-        const scale = (fx.startScale ?? 0.7) + ((fx.endScale ?? 1.15) - (fx.startScale ?? 0.7)) * t;
-        fx.node.scaling.setAll(scale);
-        fx.node.rotation.y = t * (fx.spin ?? 1.5);
-      } else if (fx.kind === 'beam') {
-        fx.node.scaling.x = 1 + Math.sin(t * Math.PI) * 0.35;
+      const seconds = (now - startedAt) / 1000;
+      switch (fx.kind) {
+        case 'projectile': {
+          if (fx.from && fx.to) {
+            fx.node.position.set(
+              fx.from.x + (fx.to.x - fx.from.x) * t,
+              fx.from.y + (fx.to.y - fx.from.y) * t + Math.sin(Math.PI * t) * (fx.arc ?? 0),
+              fx.from.z + (fx.to.z - fx.from.z) * t,
+            );
+            if (fx.spin) fx.node.rotation.z = t * fx.spin;
+          }
+          fx.material.alpha = (fx.alpha ?? 0.95) * (1 - t * t);
+          break;
+        }
+        case 'icon': {
+          if (fx.base) {
+            fx.node.position.y = fx.base.y + (fx.rise ?? 0.35) * t;
+            fx.node.rotation.y = t * (fx.spin ?? 1.3);
+            const scale = (fx.startScale ?? 1) * (1 + Math.sin(t * Math.PI) * 0.14);
+            fx.node.scaling.setAll(scale);
+          }
+          fx.material.alpha = (fx.alpha ?? 0.9) * (1 - t * t);
+          break;
+        }
+        case 'ring': {
+          const scale = (fx.startScale ?? 0.2) + ((fx.endScale ?? 2) - (fx.startScale ?? 0.2)) * t;
+          fx.node.scaling.setAll(scale);
+          fx.material.alpha = (fx.alpha ?? 0.9) * (1 - t * t);
+          break;
+        }
+        case 'aura':
+        case 'rune': {
+          const scale = (fx.startScale ?? 0.7) + ((fx.endScale ?? 1.15) - (fx.startScale ?? 0.7)) * t;
+          fx.node.scaling.setAll(scale);
+          fx.node.rotation.y = t * (fx.spin ?? 1.5);
+          fx.material.alpha = (fx.alpha ?? 0.85) * (1 - t * t);
+          break;
+        }
+        case 'beam': {
+          fx.node.scaling.x = 1 + Math.sin(t * Math.PI) * 0.35;
+          fx.material.alpha = (fx.alpha ?? 0.9) * (1 - t * t);
+          break;
+        }
+        case 'lightning': {
+          // Rapid flicker sells the electric arc without needing extra meshes.
+          fx.material.alpha = (fx.alpha ?? 0.95) * (1 - t) * (0.5 + Math.random() * 0.5);
+          break;
+        }
+        case 'spark': {
+          for (const part of fx.parts ?? []) {
+            part.mesh.position.set(
+              part.velocity.x * seconds,
+              part.velocity.y * seconds + 0.5 * (fx.gravity ?? 0) * seconds * seconds,
+              part.velocity.z * seconds,
+            );
+            part.mesh.scaling.setAll(Math.max(0.15, 1 - t * 0.85));
+          }
+          fx.material.alpha = (fx.alpha ?? 0.95) * (1 - t);
+          break;
+        }
+        case 'dome': {
+          const scale =
+            (fx.startScale ?? 0.15) + ((fx.endScale ?? 1) - (fx.startScale ?? 0.15)) * (1 - Math.pow(1 - t, 2));
+          fx.node.scaling.setAll(scale);
+          fx.material.alpha = (fx.alpha ?? 0.32) * (1 - t * t) * (0.85 + Math.sin(t * Math.PI * 6) * 0.15);
+          break;
+        }
+        case 'slash': {
+          const scale =
+            (fx.startScale ?? 0.55) + ((fx.endScale ?? 1.15) - (fx.startScale ?? 0.55)) * (1 - Math.pow(1 - t, 2));
+          fx.node.scaling.setAll(scale);
+          fx.node.rotation.y = (fx.angle ?? 0) + (fx.spin ?? 2.5) * t;
+          fx.material.alpha = (fx.alpha ?? 0.95) * (1 - t) * (1 - t);
+          break;
+        }
+        case 'pillar': {
+          fx.node.scaling.y = 0.06 + 0.94 * (1 - Math.pow(1 - t, 2));
+          fx.node.scaling.x = fx.startScale ?? 1;
+          fx.node.scaling.z = fx.startScale ?? 1;
+          fx.material.alpha = (fx.alpha ?? 0.7) * (1 - t);
+          break;
+        }
       }
-      fx.material.alpha = (fx.alpha ?? 0.9) * (1 - t * t);
     }
   }
 
